@@ -1,0 +1,27 @@
+# Dependencies & build
+node_modules/
+dist/
+
+# Local / hosted JSON persistence (never publish)
+data/
+
+# Phase evidence, store dumps, screenshots
+backups/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs & OS noise
+*.log
+npm-debug.log*
+.DS_Store
+
+# Keys / certs
+*.pem
+*.key
+
+# Test / coverage
+coverage/
+*.tsbuildinfo
