@@ -10,13 +10,18 @@
     "start": "tsx server/index.ts",
     "seed": "tsx server/seed.ts",
     "demo:prepare": "node scripts/demo-prepare.mjs",
-    "demo:accept": "node scripts/e2e-phase41-acceptance.mjs"
+    "demo:accept": "node scripts/e2e-phase41-acceptance.mjs",
+    "db:migrate": "tsx server/db/run-migrate.ts",
+    "db:import:dry": "tsx server/db/import-store.ts --dry-run",
+    "db:import": "tsx server/db/import-store.ts --apply",
+    "db:verify": "tsx server/db/verify-import.ts"
   },
   "dependencies": {
     "@nexconn/chat": "^26.2.1",
     "@nexconn/engine": "^26.2.1",
     "bcrypt": "^6.0.0",
     "motion": "^14.9.0",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsx": "^4.23.15"
@@ -24,6 +29,7 @@
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",

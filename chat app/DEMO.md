@@ -38,7 +38,7 @@ Acceptance API smoke (requires `npm run dev` and `.env` Nexconn keys):
 npm run demo:accept
 ```
 
-**Do not** run seed/reseed/`demo:prepare` against a hosted production instance. `POST /api/dev/reseed` is refused when `NODE_ENV=production`, and otherwise requires `SHOPBRIDGE_ALLOW_RESEED=1`. For Render disk setup, see `HOSTED_DEMO_INIT.md`.
+**Do not** run seed/reseed/`demo:prepare` against a hosted production instance. `POST /api/dev/reseed` is refused when `NODE_ENV=production`, and otherwise requires `SHOPBRIDGE_ALLOW_RESEED=1`. For Neon/Render Postgres import, see `HOSTED_DEMO_INIT.md`.
 
 ## Hackathon demonstration sequence
 

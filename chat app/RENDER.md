@@ -1,18 +1,17 @@
-# ShopBridge — Render deployment (single instance)
+# ShopBridge — Render Free + Neon Free deployment
 
-Use this checklist when creating the Render service. **Do not paste secrets into git or tickets.**
+Zero-cost demo hosting: **Render Web Service (free)** + **Neon PostgreSQL (free)**.  
+Nexconn Chat remains external (App Key / App Secret in env). **No persistent disk required.**
+
+**Do not paste secrets into git or tickets.**
 
 ## Architecture
 
-- **Service type:** Web Service
+- **Service type:** Web Service (single instance)
 - **Runtime:** Node
 - **Shape:** One process serves Vite `dist/web` and `/api/*`
-- **Persistence:** JSON file via Persistent Disk (not PostgreSQL yet)
-- **Instances:** **1 only** — the in-process write queue does not protect multiple Node processes sharing one `store.json`
-
-## Why single-instance JSON is temporary
-
-Atomic temp+rename and a promise queue are safe for **one** writer process. Two instances race on `store.json` and can lose updates. PostgreSQL (or similar) is the correct next step for multi-instance durability; until then keep instance count at **1** and attach a disk.
+- **Persistence:** PostgreSQL via `DATABASE_URL` (Neon)
+- **Chat:** Nexconn SDK (messages not stored in Postgres — only `channel_id` links)
 
 ## Build & start
 
@@ -22,38 +21,59 @@ Atomic temp+rename and a promise queue are safe for **one** writer process. Two 
 | Start Command | `npm start` |
 | Health Check Path | `/api/health` |
 
-`tsx` is a **production** dependency so `npm start` (`tsx server/index.ts`) works when Render installs production deps only. Build still needs Vite (devDependency) — `npm ci` during **build** installs all deps before prune/start; if your Render plan prunes between build and start, ensure the start image still has production deps including `tsx` (default Render flow keeps `node_modules` from build).
+Production **requires** `DATABASE_URL`. The process exits on boot if it is missing when `NODE_ENV=production`. JSON file fallback is **local-only**.
 
-## Persistent Disk
+## Neon setup
 
-| Setting | Value |
-| --- | --- |
-| Mount path | `/var/data` |
-| Env | `SHOPBRIDGE_DATA_DIR=/var/data` |
+1. Create a free Neon project and copy the connection string (`DATABASE_URL`).
+2. Prefer the pooled connection string if Neon provides one.
+3. SSL is enabled automatically for Neon hosts in the app pool.
 
-The app reads/writes `/var/data/store.json` and writes backups under `/var/data/backups/` (never under static assets).
+### First-time schema + demo data (from your machine)
 
-**First deploy:** follow `HOSTED_DEMO_INIT.md` — copy a known-good `store.json` onto the disk via a private, one-time transfer. With `NODE_ENV=production`, a **missing** store makes `/api/health` return **503** and will **not** auto-create or overwrite. Never run `npm run seed` on the hosted service.
+Never run destructive seed against production. Import the curated local store once:
+
+```bash
+export DATABASE_URL='postgresql://…'   # Neon URL — keep private
+npm run db:migrate
+npm run db:import:dry                  # review counts/ids (no hashes printed)
+npm run db:import                      # apply once
+npm run db:verify
+```
+
+If the database already has rows, import aborts unless you pass `--force` intentionally:
+
+```bash
+npx tsx server/db/import-store.ts --apply --force
+```
+
+Details: `HOSTED_DEMO_INIT.md`.
 
 ## Environment variable names
-
-Set in the Render dashboard (values never committed):
 
 | Name | Purpose |
 | --- | --- |
 | `NODE_ENV` | `production` |
 | `PORT` | Provided by Render |
-| `SHOPBRIDGE_DATA_DIR` | `/var/data` |
+| `DATABASE_URL` | Neon Postgres URL (**required**) |
 | `NEXCONN_APP_KEY` | Nexconn app key |
 | `NEXCONN_APP_SECRET` | Server-only secret |
-| `NEXCONN_API_BASE` | Optional; defaults to Singapore light API |
-| `SHOPBRIDGE_DEMO_PASSWORD` | Optional hackathon demo login only |
+| `NEXCONN_API_BASE` | Optional |
+| `SHOPBRIDGE_DEMO_PASSWORD` | Optional hackathon password login |
 | `SHOPBRIDGE_ALLOW_RESEED` | **Leave unset** |
+| `SHOPBRIDGE_DATA_DIR` | Not used on Render when Postgres is configured |
+
+## Health
+
+`GET /api/health` returns:
+
+- `200` + `{ ok: true, backend: "postgres", database: { ready: true }, nexconn }` when DB is reachable
+- `503` when the database is down or `DATABASE_URL` is missing in production
+
+No connection strings or internal DB errors are exposed in the response body.
 
 ## Ops rules
 
-- Never put `npm run seed`, `demo:prepare`, or reseed in the Start Command.
-- Do not enable autoscaling / multiple instances.
-- Keep Nexconn Console Translation + Group pre-join history enabled for the live demo App Key.
-- Confirm `/api/health` is HTTP 200 with `"ok": true` and `"store": { "exists": true }` after disk is provisioned.
-- See `HOSTED_DEMO_INIT.md` for the safe import and verification steps.
+- Instance count **1** (free tier); scale-out needs careful connection limits on Neon free.
+- Do not put `npm run seed` or `demo:prepare` in Start Command.
+- Keep Nexconn Console Translation + pre-join history enabled for the demo App Key.

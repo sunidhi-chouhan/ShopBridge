@@ -47,12 +47,14 @@ import {
   setCartItem,
   signInDemo,
   signInWithPassword,
+  persistenceBackend,
   storePaths,
   toSessionUser,
   updateProduct,
   userBySession,
   type RoomParticipants,
 } from "./store";
+import { checkDatabaseReady, databaseUrlConfigured } from "./db/pool";
 
 loadEnvFile();
 import {
@@ -207,20 +209,50 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   const { pathname } = url;
 
   if (req.method === "GET" && pathname === "/api/health") {
+    const nexconn = nexconnConfigured();
+    if (databaseUrlConfigured()) {
+      const db = await checkDatabaseReady();
+      const body = {
+        ok: db.ready,
+        backend: "postgres" as const,
+        nexconn,
+        database: { ready: db.ready },
+      };
+      if (!db.ready) {
+        sendJson(res, 503, {
+          ...body,
+          error: { code: "DATABASE_UNAVAILABLE", message: "Database is not ready." },
+        });
+        return;
+      }
+      sendJson(res, 200, body);
+      return;
+    }
+    if (process.env.NODE_ENV === "production") {
+      sendJson(res, 503, {
+        ok: false,
+        backend: "none",
+        nexconn,
+        error: {
+          code: "DATABASE_REQUIRED",
+          message: "DATABASE_URL is required in production.",
+        },
+      });
+      return;
+    }
     const paths = storePaths();
     const body = {
-      ok: true as boolean,
-      nexconn: nexconnConfigured(),
+      ok: paths.storeExists,
+      backend: "json" as const,
+      nexconn,
       store: { dataDir: paths.dataDir, exists: paths.storeExists },
     };
-    // Production: fail health until a valid store file is present on the data dir.
-    if (process.env.NODE_ENV === "production" && !paths.storeExists) {
-      body.ok = false;
+    if (!paths.storeExists) {
       sendJson(res, 503, {
         ...body,
         error: {
           code: "STORE_MISSING",
-          message: "Persistent store.json is missing. Complete hosted demo initialization before traffic.",
+          message: "Local store.json is missing.",
         },
       });
       return;
@@ -645,12 +677,31 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(port, () => {
-  const paths = storePaths();
-  console.log(`ShopBridge server listening on port ${port}`);
-  console.log(`Data directory: ${paths.dataDir}`);
-  console.log(`Store file: ${paths.storeFile}${paths.storeExists ? "" : " (missing)"}`);
-  console.log(
-    "Single-instance only: JSON store is not safe for multiple Node processes. Do not enable horizontal scaling.",
-  );
-});
+function start(): void {
+  loadEnvFile();
+  if (process.env.NODE_ENV === "production" && !databaseUrlConfigured()) {
+    console.error("FATAL: DATABASE_URL is required when NODE_ENV=production.");
+    process.exit(1);
+  }
+  let backend: string;
+  try {
+    backend = persistenceBackend();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+  server.listen(port, () => {
+    console.log(`ShopBridge server listening on port ${port}`);
+    console.log(`Persistence backend: ${backend}`);
+    if (backend === "json") {
+      const paths = storePaths();
+      console.log(`Data directory: ${paths.dataDir}`);
+      console.log(`Store file: ${paths.storeFile}${paths.storeExists ? "" : " (missing)"}`);
+      console.log("JSON store is single-process only. Prefer PostgreSQL (DATABASE_URL) for hosted demos.");
+    } else {
+      console.log("PostgreSQL via DATABASE_URL (Neon-compatible pool).");
+    }
+  });
+}
+
+start();
