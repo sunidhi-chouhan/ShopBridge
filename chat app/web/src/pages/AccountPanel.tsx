@@ -1,9 +1,5 @@
 import { useState } from "react";
-import type { PublicUser } from "../../../shared/types";
-import { loadLanguagePrefs, saveLanguagePrefs, type LanguagePrefs } from "../chat/languagePrefs";
-import { syncNexconnTranslationLanguage } from "../chat/translate";
-import { chatCredentials } from "../api";
-import { connectSaathi } from "../chat/nexconn";
+import { useSession } from "../app/session";
 import { LanguageBar } from "../conversation/LanguageBar";
 import { copy } from "../copy";
 import { Avatar } from "../ui/Avatar";
@@ -13,29 +9,11 @@ import { Card } from "../ui/Card";
 import { roleLabel } from "../ui/nav";
 import { useRequestSignOut } from "../components/Shell";
 
-export function AccountPanel({ user }: { user: PublicUser }) {
+export function AccountPanel() {
+  const { user, language, autoTranslate, setLanguage, setAutoTranslate } = useSession();
   const requestSignOut = useRequestSignOut();
   const role = roleLabel(user.role);
-  const [prefs, setPrefs] = useState<LanguagePrefs>(() => loadLanguagePrefs(user.id));
   const [notice, setNotice] = useState<string | null>(null);
-
-  async function onPrefsChange(next: LanguagePrefs) {
-    setPrefs(next);
-    saveLanguagePrefs(user.id, next);
-    setNotice(null);
-    try {
-      const credentials = await chatCredentials();
-      await connectSaathi(credentials.appKey, credentials.token, credentials.userId);
-      await syncNexconnTranslationLanguage(next.targetLanguage);
-      setNotice(`Reading language set to ${next.targetLanguage}. Used when you open order rooms.`);
-    } catch (error: unknown) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Preference saved locally. Sync with Nexconn failed — enable Console Translation if needed.",
-      );
-    }
-  }
 
   return (
     <section className="account-page" aria-label="Account">
@@ -52,10 +30,6 @@ export function AccountPanel({ user }: { user: PublicUser }) {
           </div>
         </div>
         <dl className="profile-facts">
-          <div>
-            <dt>Name</dt>
-            <dd>{user.name}</dd>
-          </div>
           {user.email ? (
             <div>
               <dt>Email</dt>
@@ -66,20 +40,27 @@ export function AccountPanel({ user }: { user: PublicUser }) {
             <dt>Role</dt>
             <dd>{role}</dd>
           </div>
-          <div>
-            <dt>Session</dt>
-            <dd>Kept in this browser for ShopBridge until you sign out.</dd>
-          </div>
           {user.sample ? (
             <div>
               <dt>Account</dt>
-              <dd>Sample</dd>
+              <dd>Shared demo account</dd>
             </div>
           ) : null}
         </dl>
         <div className="account-language">
           <h3 className="account-language-title">Conversation language</h3>
-          <LanguageBar prefs={prefs} onChange={(next) => void onPrefsChange(next)} />
+          <LanguageBar
+            uiLanguage={language}
+            language={language}
+            autoTranslate={autoTranslate}
+            onLanguage={(next) => {
+              setNotice(null);
+              setLanguage(next)
+                .then(() => setNotice("Saved. Every conversation now reads in this language."))
+                .catch(() => setNotice("Could not save your language. Try again."));
+            }}
+            onAutoTranslate={setAutoTranslate}
+          />
           {notice ? (
             <p className="meta" role="status">
               {notice}

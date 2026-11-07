@@ -1,4 +1,4 @@
-import type { Category, HelpKind, OrderStatus, RequestStatus, Role } from "../shared/types";
+import type { Category, HelpKind, Language, OrderStatus, RequestStatus, Resolution, Role } from "../shared/types";
 
 export type SessionRecord = {
   token: string;
@@ -15,6 +15,7 @@ export type UserRecord = {
   sessionToken: string | null;
   sessionExpiresAt: string | null;
   sessions: SessionRecord[];
+  language?: Language | null;
   createdAt: string;
 };
 
@@ -28,6 +29,9 @@ export type RequestRecord = {
   coordinatorId: string | null;
   channelId: string | null;
   orderId: string | null;
+  resolution?: Resolution | null;
+  resolutionNote?: string | null;
+  resolvedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -72,6 +76,10 @@ export type OrderRecord = {
   total: number;
   channelId: string | null;
   createdAt: string;
+  updatedAt?: string;
+  originalTotal?: number | null;
+  offer?: { id: string; amount: number; note: string | null; state: "open" | "accepted" | "declined" } | null;
+  shipment?: { courier: string; awb: string; eta: string | null } | null;
 };
 
 export type Database = {
@@ -80,4 +88,6 @@ export type Database = {
   products: ProductRecord[];
   orders: OrderRecord[];
   carts: Record<string, CartItemRecord[]>;
+  /** JSON backend only: shared demo reset epoch. */
+  demoEpoch?: string;
 };

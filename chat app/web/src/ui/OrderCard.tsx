@@ -4,15 +4,17 @@ import { Badge } from "./Badge";
 import { cardClass } from "./Card";
 import { ProductPhoto } from "./ProductPhoto";
 
-export function statusTone(status: OrderView["status"]): "warning" | "accent" | "success" {
+export function statusTone(status: OrderView["status"]): "warning" | "accent" | "success" | "neutral" {
   if (status === "placed") return "warning";
-  if (status === "packed") return "accent";
+  if (status === "packed" || status === "shipped") return "accent";
   return "success";
 }
 
 export function statusCopy(status: OrderView["status"]): string {
   if (status === "placed") return "Placed";
   if (status === "packed") return "Packed";
+  if (status === "shipped") return "Shipped";
+  if (status === "delivered") return "Delivered";
   return "Completed";
 }
 

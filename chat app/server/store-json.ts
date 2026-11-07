@@ -2,19 +2,34 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { imagesForProductName, isAllowedProductImage, PRODUCT_IMAGES, type CatalogSort } from "../shared/catalog";
-import type {
-  CartView,
-  Category,
-  ConversationView,
-  HelpKind,
-  HelpRequestView,
-  OrderView,
-  ProductView,
-  PublicUser,
-  RequestStatus,
+import { imagesForProductName, isAllowedProductImage, type CatalogSort } from "../shared/catalog";
+import {
+  nextOrderStatus,
+  type CartView,
+  type Category,
+  type ConversationView,
+  type HelpKind,
+  type HelpRequestView,
+  type Language,
+  type OrderStatus,
+  type OrderView,
+  type ProductView,
+  type PublicUser,
+  type RequestStatus,
+  type Resolution,
 } from "../shared/types";
-import { DEMO_ACCOUNTS, SESSION_MS, demoPassword, hashPassword, verifyPassword, type DemoParty } from "./auth";
+import { SESSION_MS, demoPassword, hashPassword, verifyPassword } from "./auth";
+import {
+  DEMO_ACCOUNTS,
+  DEMO_PARTIES,
+  attachChannels,
+  buildDemoPlan,
+  demoId,
+  demoProductRecords,
+  type DemoParty,
+  type DemoPlan,
+  type DemoUserIds,
+} from "./demo-seed";
 import { loadEnvFile } from "./env";
 import { HttpError } from "./errors";
 import type {
@@ -68,112 +83,6 @@ function sessionToken(): string {
   return randomBytes(24).toString("hex");
 }
 
-function seedProducts(seller: UserRecord, now: string): ProductRecord[] {
-  const img = (name: string) => imagesForProductName(name) ?? [PRODUCT_IMAGES[0].src];
-  const sellerId = seller.id;
-  const rows: Array<Omit<ProductRecord, "id" | "createdAt" | "updatedAt" | "sample">> = [
-    {
-      sellerId,
-      name: "Maheshwari cotton sari",
-      description: "Handwoven cotton with a narrow zari border. Drapes light, made for everyday wear in warm weather.",
-      category: "textile",
-      price: 4800,
-      stock: 6,
-      published: true,
-      featured: true,
-      images: img("Maheshwari cotton sari"),
-    },
-    {
-      sellerId,
-      name: "Cane and hide tote",
-      description: "Woven cane body with a vegetable-tanned hide collar and short handles. Unlined, meant to soften with use.",
-      category: "leather",
-      price: 3700,
-      stock: 4,
-      published: true,
-      featured: false,
-      images: img("Cane and hide tote"),
-    },
-    {
-      sellerId,
-      name: "Stoneware serving bowl",
-      description: "Wheel-thrown bowl in a sand glaze. Holds a family dal or a pile of fruit. Dishwasher safe.",
-      category: "tableware",
-      price: 1850,
-      stock: 9,
-      published: true,
-      featured: false,
-      images: img("Stoneware serving bowl"),
-    },
-    {
-      sellerId,
-      name: "Hammered brass jhumkas",
-      description: "Bell earrings in unlacquered brass. Light enough for all-day wear. Wipe with a dry cloth.",
-      category: "jewelry",
-      price: 2200,
-      stock: 11,
-      published: true,
-      featured: false,
-      images: img("Hammered brass jhumkas"),
-    },
-    {
-      sellerId,
-      name: "Chandan attar, 10 ml",
-      description: "Sandalwood distilled in Kannauj and bottled in Indore. Alcohol-free. A drop on cloth lasts the evening.",
-      category: "fragrance",
-      price: 1650,
-      stock: 14,
-      published: true,
-      featured: false,
-      images: img("Chandan attar, 10 ml"),
-    },
-    {
-      sellerId,
-      name: "Block-print kantha throw",
-      description: "Cotton throw with running kantha stitch and a faded indigo print. 150 by 220 cm.",
-      category: "home",
-      price: 3200,
-      stock: 5,
-      published: true,
-      featured: false,
-      images: img("Block-print kantha throw"),
-    },
-    {
-      sellerId,
-      name: "Vegetable-tanned belt",
-      description: "Thirty-millimetre strap with a plain brass buckle. Cut from a single hide. Choose your hole; it will mark with wear.",
-      category: "leather",
-      price: 1450,
-      stock: 8,
-      published: true,
-      featured: false,
-      images: img("Vegetable-tanned belt"),
-    },
-    {
-      sellerId,
-      name: "Narmada clay cup, set of two",
-      description: "Unglazed sipping cups. The clay keeps water cool. Not for the dishwasher.",
-      category: "tableware",
-      price: 780,
-      stock: 0,
-      published: true,
-      featured: false,
-      images: img("Narmada clay cup, set of two"),
-    },
-  ];
-  const origin = Date.parse(now);
-  return rows.map((row, index) => {
-    const createdAt = new Date(origin - (rows.length - 1 - index) * 36e5).toISOString();
-    return {
-      ...row,
-      id: idFor("p"),
-      sample: true,
-      createdAt,
-      updatedAt: createdAt,
-    };
-  });
-}
-
 function isAuthDatabase(value: unknown): value is Database {
   if (!value || typeof value !== "object") return false;
   const db = value as Database;
@@ -196,43 +105,22 @@ function sessionExpiry(): string {
 async function buildDemoDatabase(): Promise<Database> {
   const now = new Date().toISOString();
   const passwordHash = await hashPassword(demoPassword());
-  const buyer: UserRecord = {
-    id: idFor("m"),
-    ...DEMO_ACCOUNTS.buyer,
-    passwordHash,
-    sample: true,
-    sessionToken: null,
-    sessionExpiresAt: null,
-    sessions: [],
-    createdAt: now,
-  };
-  const seller: UserRecord = {
-    id: idFor("v"),
-    ...DEMO_ACCOUNTS.seller,
-    passwordHash,
-    sample: true,
-    sessionToken: null,
-    sessionExpiresAt: null,
-    sessions: [],
-    createdAt: now,
-  };
-  const support: UserRecord = {
-    id: idFor("c"),
-    ...DEMO_ACCOUNTS.support,
-    passwordHash,
-    sample: true,
-    sessionToken: null,
-    sessionExpiresAt: null,
-    sessions: [],
-    createdAt: now,
-  };
-  return {
-    users: [buyer, seller, support],
-    requests: [],
-    products: seedProducts(seller, now),
-    orders: [],
-    carts: {},
-  };
+  const ids: DemoUserIds = { buyer: idFor("m"), seller: idFor("v"), support: idFor("c") };
+  const users = DEMO_PARTIES.map(
+    (party): UserRecord => ({
+      id: ids[party],
+      ...DEMO_ACCOUNTS[party],
+      passwordHash,
+      sample: true,
+      sessionToken: null,
+      sessionExpiresAt: null,
+      sessions: [],
+      createdAt: now,
+    }),
+  );
+  const db: Database = { users, requests: [], products: [], orders: [], carts: {} };
+  applyPlanToDb(db, attachChannels(buildDemoPlan(ids, now), (orderId) => `order${orderId}`), ids);
+  return db;
 }
 
 async function backupStore(): Promise<string | null> {
@@ -310,7 +198,7 @@ function withCatalog(db: Database): Database {
   }
   if (db.products.length === 0) {
     const seller = db.users.find((user) => user.role === "volunteer");
-    if (seller) db.products = seedProducts(seller, new Date().toISOString());
+    if (seller) db.products = demoProductRecords(seller.id, new Date().toISOString());
   }
   remapCatalogImages(db);
   return db;
@@ -412,7 +300,7 @@ function update<T>(fn: (db: Database) => { db: Database; result: T }): Promise<T
 }
 
 export function toPublicUser(user: UserRecord): PublicUser {
-  return { id: user.id, name: user.name, role: user.role, sample: user.sample };
+  return { id: user.id, name: user.name, role: user.role, sample: user.sample, language: user.language ?? null };
 }
 
 export function toSessionUser(user: UserRecord): PublicUser {
@@ -425,7 +313,8 @@ function attachSession(user: UserRecord): PublicUser & { sessionToken: string } 
   const expiresAt = sessionExpiry();
   user.sessions.push({ token, expiresAt });
   // Keep several live sessions so a second tab/demo login does not kick this browser out.
-  user.sessions = user.sessions.slice(-8);
+  // Shared demo accounts keep many more so concurrent judges never evict each other.
+  user.sessions = user.sessions.slice(user.sample ? -500 : -8);
   user.sessionToken = token;
   user.sessionExpiresAt = expiresAt;
   return { ...toSessionUser(user), sessionToken: token };
@@ -448,6 +337,9 @@ function viewOf(db: Database, request: RequestRecord): HelpRequestView {
     coordinator: coordinator ? toPublicUser(coordinator) : null,
     channelId: request.channelId,
     orderId: request.orderId ?? null,
+    resolution: request.resolution ?? null,
+    resolutionNote: request.resolutionNote ?? null,
+    resolvedAt: request.resolvedAt ?? null,
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
   };
@@ -676,6 +568,17 @@ export function saveChannel(requestId: string, channelId: string): Promise<HelpR
   });
 }
 
+/**
+ * Who may move a request forward. Order support is a buyer–seller dispute, so only the
+ * support agent on the case may advance or close it — never the seller.
+ */
+export function canChangeRequestStatus(actor: UserRecord, request: RequestRecord): boolean {
+  if (request.orderId) {
+    return actor.role === "coordinator" && request.coordinatorId === actor.id;
+  }
+  return actor.role === "coordinator" || (actor.role === "volunteer" && actor.id === request.volunteerId);
+}
+
 export function changeStatus(
   actor: UserRecord,
   requestId: string,
@@ -684,11 +587,17 @@ export function changeStatus(
   return update((db) => {
     const request = db.requests.find((item) => item.id === requestId);
     if (!request) throw new HttpError(404, "NOT_FOUND", "That request does not exist.");
-    const allowed =
-      actor.role === "coordinator" ||
-      (actor.role === "volunteer" && actor.id === request.volunteerId);
-    if (!allowed) {
-      throw new HttpError(403, "FORBIDDEN", "Only the assigned volunteer or a coordinator can update status.");
+    if (request.orderId) {
+      throw new HttpError(409, "USE_RESOLUTION", "Order support moves forward by proposing a resolution.");
+    }
+    if (!canChangeRequestStatus(actor, request)) {
+      throw new HttpError(
+        403,
+        "FORBIDDEN",
+        request.orderId
+          ? "Only the support agent on this case can update it."
+          : "Only the assigned volunteer or a coordinator can update status.",
+      );
     }
     const expected = status === "in_progress" ? "assigned" : "in_progress";
     if (request.status !== expected) {
@@ -758,7 +667,12 @@ function orderView(db: Database, order: OrderRecord): OrderView {
     }),
     total: order.total,
     channelId: order.channelId,
+    offer: order.offer
+      ? { ...order.offer, was: order.originalTotal ?? order.total }
+      : null,
+    shipment: order.shipment ?? null,
     createdAt: order.createdAt,
+    updatedAt: order.updatedAt ?? order.createdAt,
   };
 }
 
@@ -995,6 +909,7 @@ export function checkout(buyer: UserRecord): Promise<OrderView[]> {
         total,
         channelId: null,
         createdAt: now,
+        updatedAt: now,
       };
       db.orders.push(order);
       created.push(order);
@@ -1094,6 +1009,7 @@ export function listConversations(user: UserRecord): Promise<ConversationView[]>
         orderId: order.id,
         channelId: order.channelId,
         title: order.items[0]?.name ?? `Order ${order.id}`,
+        image: order.items[0]?.image ?? "",
         total: order.total,
         status: order.status,
         counterpart: toPublicUser(counterpart),
@@ -1176,5 +1092,221 @@ export function claimOrderSupport(
         buyerId: order.buyerId,
       },
     };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Preferences, order lifecycle and support resolution
+// ---------------------------------------------------------------------------
+
+export function setUserLanguage(user: UserRecord, language: Language): Promise<PublicUser> {
+  return update((db) => {
+    const record = db.users.find((item) => item.id === user.id);
+    if (!record) throw new HttpError(404, "NOT_FOUND", "That account does not exist.");
+    record.language = language;
+    return { db, result: toSessionUser(record) };
+  });
+}
+
+export function advanceOrder(
+  seller: UserRecord,
+  orderId: string,
+  status: OrderStatus,
+  shipment?: { courier: string; awb: string; eta: string | null } | null,
+): Promise<{ order: OrderView; previous: OrderStatus }> {
+  return update((db) => {
+    const order = db.orders.find((item) => item.id === orderId);
+    if (!order || seller.role !== "volunteer" || order.sellerId !== seller.id) {
+      throw new HttpError(404, "NOT_FOUND", "That order does not exist.");
+    }
+    if (nextOrderStatus(order.status) !== status) {
+      throw new HttpError(409, "BAD_STATUS", "Move the order one step at a time.");
+    }
+    const previous = order.status;
+    order.status = status;
+    if (status === "shipped" && shipment) order.shipment = shipment;
+    order.updatedAt = new Date().toISOString();
+    return { db, result: { order: orderView(db, order), previous } };
+  });
+}
+
+export function proposeResolution(
+  agent: UserRecord,
+  requestId: string,
+  resolution: Resolution,
+  note: string,
+): Promise<HelpRequestView> {
+  return update((db) => {
+    const request = db.requests.find((item) => item.id === requestId);
+    if (!request || !request.orderId) throw new HttpError(404, "NOT_FOUND", "That support case does not exist.");
+    if (agent.role !== "coordinator" || request.coordinatorId !== agent.id) {
+      throw new HttpError(403, "FORBIDDEN", "Only the support agent on this case can propose a resolution.");
+    }
+    if (request.status !== "assigned" && request.status !== "in_progress") {
+      throw new HttpError(409, "BAD_STATUS", "This case is not open for a proposal.");
+    }
+    request.status = "in_progress";
+    request.resolution = resolution;
+    request.resolutionNote = note || null;
+    request.resolvedAt = null;
+    request.updatedAt = new Date().toISOString();
+    return { db, result: viewOf(db, request) };
+  });
+}
+
+export function respondToResolution(buyer: UserRecord, requestId: string, accept: boolean): Promise<HelpRequestView> {
+  return update((db) => {
+    const request = db.requests.find((item) => item.id === requestId);
+    if (!request || !request.orderId || request.memberId !== buyer.id) {
+      throw new HttpError(404, "NOT_FOUND", "That support case does not exist.");
+    }
+    if (request.status !== "in_progress" || !request.resolution) {
+      throw new HttpError(409, "BAD_STATUS", "There is no proposal to answer.");
+    }
+    const now = new Date().toISOString();
+    if (accept) {
+      request.status = "completed";
+      request.resolvedAt = now;
+    } else {
+      request.status = "assigned";
+      request.resolution = null;
+      request.resolutionNote = null;
+    }
+    request.updatedAt = now;
+    return { db, result: viewOf(db, request) };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shared demo environment (local JSON backend)
+// ---------------------------------------------------------------------------
+
+export async function getDemoEpoch(): Promise<string | null> {
+  return (await readDb()).demoEpoch ?? null;
+}
+
+export async function demoUserIds(): Promise<DemoUserIds> {
+  const db = await readDb();
+  const prefix: Record<DemoParty, string> = { buyer: "m", seller: "v", support: "c" };
+  const ids = {} as DemoUserIds;
+  for (const party of DEMO_PARTIES) {
+    ids[party] = db.users.find((user) => user.email === DEMO_ACCOUNTS[party].email)?.id ?? demoId(prefix[party]);
+  }
+  return ids;
+}
+
+export type DemoResetMeta = { actorId: string | null; actorRole: string | null; client: string | null };
+
+/** Remove demo-scoped records and insert the canonical plan. Mutates `db`. */
+function applyPlanToDb(db: Database, plan: DemoPlan, users: DemoUserIds): void {
+  const ids = new Set(DEMO_PARTIES.map((party) => users[party]));
+  const orderIds = new Set(
+    db.orders.filter((order) => ids.has(order.buyerId) || ids.has(order.sellerId)).map((order) => order.id),
+  );
+  db.requests = db.requests.filter((request) =>
+    request.orderId
+      ? !orderIds.has(request.orderId)
+      : !ids.has(request.memberId) &&
+        !(request.volunteerId && ids.has(request.volunteerId)) &&
+        !(request.coordinatorId && ids.has(request.coordinatorId)),
+  );
+  db.orders = db.orders.filter((order) => !orderIds.has(order.id));
+  const demoProductIds = new Set(db.products.filter((product) => ids.has(product.sellerId)).map((product) => product.id));
+  for (const userId of Object.keys(db.carts)) {
+    db.carts[userId] = ids.has(userId) ? [] : db.carts[userId].filter((item) => !demoProductIds.has(item.productId));
+  }
+  db.products = db.products.filter((product) => !ids.has(product.sellerId));
+  db.products.push(...plan.products);
+  for (const entry of plan.orders) {
+    db.orders.push(entry.order);
+    if (entry.request) db.requests.push(entry.request);
+  }
+}
+
+let resetRunning = false;
+
+export async function applyDemoReset(
+  plan: DemoPlan,
+  users: DemoUserIds,
+  passwordHash: string | null,
+  _meta: DemoResetMeta,
+): Promise<{ epoch: string }> {
+  if (resetRunning) throw new HttpError(409, "RESET_IN_PROGRESS", "A demo reset is already running.");
+  resetRunning = true;
+  try {
+    return await update((db) => {
+      // Work on a copy so a failure leaves the stored file untouched (write happens only on success).
+      const next: Database = JSON.parse(JSON.stringify(db));
+      const now = new Date().toISOString();
+      for (const party of DEMO_PARTIES) {
+        const spec = DEMO_ACCOUNTS[party];
+        const existing = next.users.find((user) => user.email === spec.email);
+        if (existing) {
+          existing.name = spec.name;
+          existing.role = spec.role;
+          existing.sample = true;
+          existing.language = spec.language;
+          if (passwordHash) existing.passwordHash = passwordHash;
+          users[party] = existing.id;
+        } else {
+          if (!passwordHash) {
+            throw new HttpError(503, "DEMO_PASSWORD_MISSING", "Set SHOPBRIDGE_DEMO_PASSWORD to recreate demo accounts.");
+          }
+          next.users.push({
+            id: users[party],
+            ...spec,
+            passwordHash,
+            sample: true,
+            sessionToken: null,
+            sessionExpiresAt: null,
+            sessions: [],
+            createdAt: now,
+          });
+        }
+      }
+      applyPlanToDb(next, plan, users);
+      next.demoEpoch = now;
+      return { db: next, result: { epoch: now } };
+    });
+  } finally {
+    resetRunning = false;
+  }
+}
+
+export async function recordDemoResetFailure(_meta: DemoResetMeta, _detail: string): Promise<void> {
+  // JSON backend: failures are logged by the caller; there is no audit table.
+}
+
+export function makeOffer(seller: UserRecord, orderId: string, amount: number, note: string): Promise<OrderView> {
+  return update((db) => {
+    const order = db.orders.find((item) => item.id === orderId);
+    if (!order || seller.role !== "volunteer" || order.sellerId !== seller.id) {
+      throw new HttpError(404, "NOT_FOUND", "That order does not exist.");
+    }
+    if (order.status !== "placed" && order.status !== "packed") {
+      throw new HttpError(409, "BAD_STATUS", "Offers can only be made before the order ships.");
+    }
+    const base = order.originalTotal ?? order.total;
+    if (!(amount > 0 && amount < base)) {
+      throw new HttpError(422, "VALIDATION_ERROR", "An offer must be lower than the original price.");
+    }
+    order.originalTotal = base;
+    order.offer = { id: idFor("f"), amount: Math.round(amount), note: note || null, state: "open" };
+    order.updatedAt = new Date().toISOString();
+    return { db, result: orderView(db, order) };
+  });
+}
+
+export function respondToOffer(buyer: UserRecord, orderId: string, offerId: string, accept: boolean): Promise<OrderView> {
+  return update((db) => {
+    const order = db.orders.find((item) => item.id === orderId);
+    if (!order || order.buyerId !== buyer.id) throw new HttpError(404, "NOT_FOUND", "That order does not exist.");
+    if (!order.offer || order.offer.id !== offerId || order.offer.state !== "open") {
+      throw new HttpError(409, "OFFER_CLOSED", "This offer is no longer open.");
+    }
+    order.offer.state = accept ? "accepted" : "declined";
+    if (accept) order.total = order.offer.amount;
+    order.updatedAt = new Date().toISOString();
+    return { db, result: orderView(db, order) };
   });
 }

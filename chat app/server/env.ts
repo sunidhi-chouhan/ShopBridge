@@ -7,6 +7,8 @@ let loaded = false;
 export function loadEnvFile(): void {
   if (loaded) return;
   loaded = true;
+  // Tests set this so a developer's real .env (e.g. a production DATABASE_URL) is never read.
+  if (process.env.SHOPBRIDGE_SKIP_DOTENV === "1") return;
   try {
     const text = readFileSync(path.resolve(".env"), "utf8");
     for (const line of text.split("\n")) {

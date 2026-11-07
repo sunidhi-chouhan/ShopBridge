@@ -9,6 +9,7 @@ import { PageTrail } from "../ui/PageTrail";
 import { ProductPhoto } from "../ui/ProductPhoto";
 import { PurchaseBar } from "../ui/PurchaseBar";
 import { QtyStepper } from "../ui/QtyStepper";
+import { navigate, useRoute } from "../ui/route";
 import { SbLoader } from "../ui/SbLoader";
 import { EmptyState, ErrorState, LoadingState } from "../ui/StateView";
 import { useToast } from "../ui/Toast";
@@ -53,15 +54,36 @@ function countCart(cart: CartView): number {
 }
 
 export function ShopFlow({ onOpenOrders }: { onOpenOrders: () => void }) {
-  const [view, setView] = useState<View>({ name: "catalog" });
+  const [route] = useRoute();
+  const [bag, setBag] = useState(false);
+  const [confirm, setConfirm] = useState<OrderView[] | null>(null);
   const [bagCount, setBagCount] = useState(0);
   const [bagBump, setBagBump] = useState(0);
   const catalogScroll = useRef(0);
+
+  const productId = route.productId;
+  const prevProductId = useRef(productId);
+  const view: View = confirm
+    ? { name: "confirm", orders: confirm }
+    : bag
+      ? { name: "bag" }
+      : productId
+        ? { name: "product", id: productId }
+        : { name: "catalog" };
 
   function applyCart(cart: CartView, bump = false) {
     setBagCount(countCart(cart));
     if (bump) setBagBump((current) => current + 1);
   }
+
+  // Shop nav / back clears `#/shop/:id` while bag may still be open from a PDP — close it.
+  useEffect(() => {
+    if (prevProductId.current && !productId) {
+      setBag(false);
+      setConfirm(null);
+    }
+    prevProductId.current = productId;
+  }, [productId]);
 
   useEffect(() => {
     getCart()
@@ -69,10 +91,25 @@ export function ShopFlow({ onOpenOrders }: { onOpenOrders: () => void }) {
       .catch(() => undefined);
   }, [view.name]);
 
-  function leaveCatalog(next: View) {
+  function openProduct(id: string) {
     const canvas = document.querySelector(".canvas");
     if (canvas) catalogScroll.current = canvas.scrollTop;
-    setView(next);
+    setBag(false);
+    setConfirm(null);
+    navigate("shop", id);
+  }
+
+  function openCatalog() {
+    setBag(false);
+    setConfirm(null);
+    navigate("shop");
+  }
+
+  function openBag() {
+    const canvas = document.querySelector(".canvas");
+    if (canvas && view.name === "catalog") catalogScroll.current = canvas.scrollTop;
+    setConfirm(null);
+    setBag(true);
   }
 
   useEffect(() => {
@@ -83,18 +120,18 @@ export function ShopFlow({ onOpenOrders }: { onOpenOrders: () => void }) {
       return;
     }
     canvas.scrollTop = 0;
-  }, [view.name]);
+  }, [view.name, productId]);
 
   const onCatalog = view.name === "catalog";
 
   return (
     <>
-      <div hidden={!onCatalog} inert={!onCatalog}>
+      <div hidden={!onCatalog} {...(onCatalog ? {} : { inert: true })}>
         <CatalogPage
           bagCount={bagCount}
           bagBump={bagBump}
-          onProduct={(id) => leaveCatalog({ name: "product", id })}
-          onBag={() => leaveCatalog({ name: "bag" })}
+          onProduct={openProduct}
+          onBag={openBag}
         />
       </div>
       {view.name === "product" ? (
@@ -103,22 +140,25 @@ export function ShopFlow({ onOpenOrders }: { onOpenOrders: () => void }) {
           id={view.id}
           bagCount={bagCount}
           bagBump={bagBump}
-          onBack={() => setView({ name: "catalog" })}
-          onBag={() => setView({ name: "bag" })}
-          onProduct={(id) => setView({ name: "product", id })}
+          onBack={openCatalog}
+          onBag={openBag}
+          onProduct={openProduct}
           onCart={(cart, bump) => applyCart(cart, bump)}
         />
       ) : null}
       {view.name === "bag" ? (
         <BagPage
-          onBack={() => setView({ name: "catalog" })}
-          onProduct={(id) => setView({ name: "product", id })}
-          onConfirm={(orders) => setView({ name: "confirm", orders })}
+          onBack={openCatalog}
+          onProduct={openProduct}
+          onConfirm={(orders) => {
+            setBag(false);
+            setConfirm(orders);
+          }}
           onCart={(cart) => applyCart(cart)}
         />
       ) : null}
       {view.name === "confirm" ? (
-        <ConfirmPage orders={view.orders} onOrders={onOpenOrders} onShop={() => setView({ name: "catalog" })} />
+        <ConfirmPage orders={view.orders} onOrders={onOpenOrders} onShop={openCatalog} />
       ) : null}
     </>
   );
@@ -328,8 +368,20 @@ function CatalogPage({
 }
 
 function ProductTile({ product, onOpen }: { product: ProductView; onOpen: () => void }) {
+  const held = product.stock === 0;
   return (
-    <button type="button" className="tile" onClick={onOpen}>
+    <button
+      type="button"
+      className={`tile${held ? " is-held" : ""}`}
+      data-testid="product-tile"
+      data-product-id={product.id}
+      data-available={held ? "false" : "true"}
+      disabled={held}
+      aria-disabled={held || undefined}
+      onClick={() => {
+        if (!held) onOpen();
+      }}
+    >
       <span className="tile-frame">
         <ProductPhoto src={product.images[0]} alt={imageAlt(product.images[0], product.name)} />
       </span>
@@ -337,7 +389,7 @@ function ProductTile({ product, onOpen }: { product: ProductView; onOpen: () => 
         <strong>{product.name}</strong>
         <span className="tile-price">{formatInr(product.price)}</span>
         <span className="tile-maker">{product.seller.name}</span>
-        {product.stock === 0 ? <span className="sold">Held</span> : null}
+        {held ? <span className="sold">Held</span> : null}
       </span>
     </button>
   );
@@ -454,7 +506,7 @@ function ProductPage({
             {product.seller.name} · {product.stock > 0 ? `${product.stock} on the shelf` : "Held for now"}
             {product.stock > 0 ? ` · add up to ${product.stock}` : ""}
           </p>
-          <form className="pdp-buy" onSubmit={add}>
+          <form className="pdp-buy" data-testid="pdp-buy" onSubmit={add}>
             <PurchaseBar
               quantity={qty}
               max={product.stock}

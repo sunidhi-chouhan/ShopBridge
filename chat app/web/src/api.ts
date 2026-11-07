@@ -4,12 +4,13 @@ import type {
   CartView,
   Category,
   ConversationView,
-  HelpKind,
   HelpRequestView,
+  Language,
+  OrderStatus,
   OrderView,
   ProductView,
   PublicUser,
-  RequestStatus,
+  Resolution,
 } from "../../shared/types";
 
 export class ApiError extends Error {
@@ -38,6 +39,40 @@ function notifyUnauthorized(): void {
   for (const listener of unauthorizedListeners) listener();
 }
 
+type EpochListener = (epoch: string) => void;
+const epochListeners = new Set<EpochListener>();
+let knownEpoch: string | null = null;
+let ownResetEpoch: string | null = null;
+
+/**
+ * Fired when the shared demo was reset (by anyone). Every API response carries the
+ * server's demo epoch; a change means data on screen may be stale.
+ */
+export function onDemoEpochChange(listener: EpochListener): () => void {
+  epochListeners.add(listener);
+  return () => {
+    epochListeners.delete(listener);
+  };
+}
+
+/** True when the given epoch came from a reset this browser started. */
+export function isOwnReset(epoch: string): boolean {
+  return epoch === ownResetEpoch;
+}
+
+function trackEpoch(response: Response): void {
+  const epoch = response.headers.get("x-demo-epoch");
+  if (!epoch) return;
+  if (knownEpoch === null) {
+    knownEpoch = epoch;
+    return;
+  }
+  if (epoch !== knownEpoch) {
+    knownEpoch = epoch;
+    for (const listener of epochListeners) listener(epoch);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -47,6 +82,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
+  trackEpoch(response);
   const body = (await response.json().catch(() => null)) as (T & ApiErrorBody) | null;
   if (!response.ok) {
     const message = body && "error" in body ? body.error.message : "Something went wrong. Try again.";
@@ -81,35 +117,6 @@ export function signOut(): Promise<{ ok: boolean }> {
 
 export function listRequests(): Promise<{ requests: HelpRequestView[] }> {
   return request("/api/requests");
-}
-
-export function listVolunteers(): Promise<{ volunteers: PublicUser[] }> {
-  return request("/api/volunteers");
-}
-
-export function createHelpRequest(kind: HelpKind, note: string): Promise<{ request: HelpRequestView }> {
-  return request("/api/requests", { method: "POST", body: JSON.stringify({ kind, note }) });
-}
-
-export function assignVolunteer(requestId: string, volunteerId: string): Promise<{ request: HelpRequestView; nexconn: boolean }> {
-  return request(`/api/requests/${requestId}/assign`, {
-    method: "POST",
-    body: JSON.stringify({ volunteerId }),
-  });
-}
-
-export function openRoom(requestId: string): Promise<{ request: HelpRequestView; nexconn: boolean }> {
-  return request(`/api/requests/${requestId}/room`, { method: "POST", body: "{}" });
-}
-
-export function updateStatus(
-  requestId: string,
-  status: Extract<RequestStatus, "in_progress" | "completed">,
-): Promise<{ request: HelpRequestView; nexconn: boolean }> {
-  return request(`/api/requests/${requestId}/status`, {
-    method: "POST",
-    body: JSON.stringify({ status }),
-  });
 }
 
 export function chatCredentials(): Promise<{ appKey: string; token: string; userId: string }> {
@@ -210,4 +217,69 @@ export function patchProduct(
 
 export function deleteProduct(id: string): Promise<{ ok: boolean }> {
   return request(`/api/seller/products/${id}`, { method: "DELETE", body: "{}" });
+}
+
+export function setLanguagePreference(language: Language): Promise<{ user: PublicUser }> {
+  return request("/api/me/preferences", { method: "PATCH", body: JSON.stringify({ language }) });
+}
+
+export function advanceOrder(
+  id: string,
+  status: OrderStatus,
+  shipment?: { courier: string; awb: string; eta?: string },
+): Promise<{ order: OrderView }> {
+  return request(`/api/orders/${id}/status`, { method: "POST", body: JSON.stringify({ status, ...(shipment ?? {}) }) });
+}
+
+/** Seller makes a lower-price offer; the server validates it and posts the offer card. */
+export function makeOffer(orderId: string, amount: number, note: string): Promise<{ order: OrderView }> {
+  return request(`/api/orders/${orderId}/offers`, { method: "POST", body: JSON.stringify({ amount, note }) });
+}
+
+export function respondToOffer(orderId: string, offerId: string, accept: boolean): Promise<{ order: OrderView }> {
+  return request(`/api/orders/${orderId}/offers/${offerId}`, { method: "POST", body: JSON.stringify({ accept }) });
+}
+
+export function proposeResolution(
+  requestId: string,
+  resolution: Resolution,
+  note: string,
+): Promise<{ request: HelpRequestView }> {
+  return request(`/api/requests/${requestId}/resolution`, {
+    method: "POST",
+    body: JSON.stringify({ resolution, note }),
+  });
+}
+
+export function answerResolution(requestId: string, accept: boolean): Promise<{ request: HelpRequestView }> {
+  return request(`/api/requests/${requestId}/response`, { method: "POST", body: JSON.stringify({ accept }) });
+}
+
+export type DemoStatus = { resetEnabled: boolean; canReset: boolean; epoch: string | null };
+
+export function demoStatus(): Promise<DemoStatus> {
+  return request("/api/demo/status");
+}
+
+export async function resetDemo(): Promise<{ ok: true; epoch: string; orders: number; nexconn: boolean }> {
+  const result = await request<{ ok: true; epoch: string; orders: number; nexconn: boolean }>("/api/demo/reset", {
+    method: "POST",
+    headers: { "X-ShopBridge-Intent": "reset-demo" },
+    body: JSON.stringify({ confirm: "RESET" }),
+  });
+  ownResetEpoch = result.epoch;
+  return result;
+}
+
+export type AssistDraft = { draft: string; model: string };
+
+export function draftSupportReply(
+  requestId: string,
+  transcript: Array<{ from: string; role: string; text: string }>,
+  language: Language,
+): Promise<AssistDraft> {
+  return request(`/api/requests/${requestId}/assist`, {
+    method: "POST",
+    body: JSON.stringify({ transcript, language }),
+  });
 }

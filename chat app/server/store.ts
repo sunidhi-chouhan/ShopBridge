@@ -84,3 +84,17 @@ export const createOrderSupport = (...args: Parameters<typeof jsonStore.createOr
   api().createOrderSupport(...args);
 export const claimOrderSupport = (...args: Parameters<typeof jsonStore.claimOrderSupport>) =>
   api().claimOrderSupport(...args);
+export const setUserLanguage = (...args: Parameters<typeof jsonStore.setUserLanguage>) => api().setUserLanguage(...args);
+export const advanceOrder = (...args: Parameters<typeof jsonStore.advanceOrder>) => api().advanceOrder(...args);
+export const proposeResolution = (...args: Parameters<typeof jsonStore.proposeResolution>) =>
+  api().proposeResolution(...args);
+export const respondToResolution = (...args: Parameters<typeof jsonStore.respondToResolution>) =>
+  api().respondToResolution(...args);
+export const getDemoEpoch = () => api().getDemoEpoch();
+export const demoUserIds = () => api().demoUserIds();
+export const applyDemoReset = (...args: Parameters<typeof jsonStore.applyDemoReset>) => api().applyDemoReset(...args);
+export const recordDemoResetFailure = (...args: Parameters<typeof jsonStore.recordDemoResetFailure>) =>
+  api().recordDemoResetFailure(...args);
+export type { DemoResetMeta } from "./store-json";
+export const makeOffer = (...args: Parameters<typeof jsonStore.makeOffer>) => api().makeOffer(...args);
+export const respondToOffer = (...args: Parameters<typeof jsonStore.respondToOffer>) => api().respondToOffer(...args);

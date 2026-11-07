@@ -6,25 +6,32 @@ import { loadEnvFile } from "./env";
 import { HttpError } from "./errors";
 import {
   NexconnError,
-  createHelpRoom,
   createOrderRoom,
   issueAccessToken,
   joinGroupMembers,
   nexconnAppKey,
   nexconnConfigured,
-  sendRoomText,
+  sendCustomMessage,
+  sendSystemText,
 } from "./nexconn";
+import { cardContent } from "./cards";
+import { formatInr } from "../shared/catalog";
+import { MESSAGE_TYPES } from "../shared/types";
+import { currentDemoEpoch, demoResetEnabled, resetDemoForUser, startDemoEpochWatch } from "./demo-reset";
+import { clientKey } from "./auth";
+import { draftReply, parseTranscript } from "./assist";
 import { SESSION_MS, assertAuthRate, parseDemoParty, reseedAllowed } from "./auth";
 import {
+  advanceOrder,
   assertOrderRoomAccess,
+  makeOffer,
+  respondToOffer,
   canReadRequest,
-  changeStatus,
   checkout,
   claimOrderSupport,
   clearSession,
   createOrderSupport,
   createProduct,
-  createRequest,
   deleteProduct,
   getCart,
   getOrder,
@@ -34,17 +41,15 @@ import {
   listOrders,
   listRequests,
   listSellerProducts,
-  listVolunteers,
   orderParticipants,
-  prepareAssignment,
-  prepareRoom,
+  proposeResolution,
   registerBuyer,
   reseedDemo,
   requestRecord,
-  saveAssignment,
-  saveChannel,
+  respondToResolution,
   saveOrderChannel,
   setCartItem,
+  setUserLanguage,
   signInDemo,
   signInWithPassword,
   persistenceBackend,
@@ -52,9 +57,9 @@ import {
   toSessionUser,
   updateProduct,
   userBySession,
-  type RoomParticipants,
 } from "./store";
-import { checkDatabaseReady, databaseUrlConfigured } from "./db/pool";
+import { checkDatabaseReady, databaseUrlConfigured, withClient } from "./db/pool";
+import { applyMigrations } from "./db/migrate";
 
 loadEnvFile();
 import {
@@ -63,28 +68,41 @@ import {
   parseEmail,
   parseId,
   parseImages,
-  parseKind,
+  parseLanguage,
   parseName,
   parseNote,
+  parseOrderStatus,
   parsePassword,
   parsePrice,
   parseProductName,
   parsePublished,
   parseQuantity,
-  parseStatus,
+  parseResolution,
+  parseResolutionNote,
+  parseShortText,
   parseStock,
   requireObject,
 } from "./validate";
-import { CATEGORIES, type Category, type HelpKind, type HelpRequestView, type PublicUser } from "../shared/types";
+import { CATEGORIES, type Category, type HelpRequestView, type OrderStatus, type PublicUser, type Resolution } from "../shared/types";
 
 const port = Number(process.env.PORT || 8787);
-const COOKIE = "saathi_session";
+const COOKIE = "shopbridge_session";
+/** Cookie name used before the rename; still accepted so nobody is signed out by the upgrade. */
+const LEGACY_COOKIE = "saathi_session";
 const webRoot = path.resolve("dist/web");
 
-function kindLabel(kind: HelpKind): string {
-  if (kind === "groceries") return "groceries";
-  if (kind === "transport") return "medical transport";
-  return "a companion visit";
+const RESOLUTION_LABEL: Record<Resolution, string> = {
+  replacement: "Replacement",
+  refund: "Refund",
+  return: "Return and refund",
+  info: "Information shared",
+};
+
+function orderEventText(status: OrderStatus, actor: string): string {
+  if (status === "packed") return `Update · Packed by ${actor}.`;
+  if (status === "shipped") return "Update · Shipped. On its way to the buyer.";
+  if (status === "delivered") return "Update · Delivered.";
+  return `Update · Order status changed to ${status}.`;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown, extraHeaders: Record<string, string> = {}): void {
@@ -96,6 +114,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, extraHeade
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
+    "X-Demo-Epoch": currentDemoEpoch() ?? "",
     ...extraHeaders,
   });
   res.end(payload);
@@ -111,6 +130,42 @@ function sendError(res: ServerResponse, error: unknown): void {
     return;
   }
   sendJson(res, 500, { error: { code: "SERVER_ERROR", message: "Something went wrong. Try again." } });
+}
+
+/** True when Origin is same-site as this request (or missing). Allows Vite→API on loopback. */
+function isTrustedDemoResetOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  let originHost: string;
+  let originHostname: string;
+  try {
+    const url = new URL(origin);
+    originHost = url.host;
+    originHostname = url.hostname;
+  } catch {
+    return false;
+  }
+  const forwarded = req.headers["x-forwarded-host"];
+  const hostHeader = (typeof forwarded === "string" ? forwarded.split(",")[0]?.trim() : undefined) || req.headers.host;
+  if (!hostHeader) return false;
+  if (originHost === hostHeader) return true;
+
+  const hostHostname = hostHeader.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  const loopback = new Set(["localhost", "127.0.0.1", "::1"]);
+  // Local only: browser talks to Vite (e.g. :5173) which proxies to the API (:8787).
+  if (process.env.NODE_ENV !== "production" && loopback.has(originHostname) && loopback.has(hostHostname)) {
+    return true;
+  }
+
+  const publicOrigin = process.env.SHOPBRIDGE_PUBLIC_ORIGIN?.trim();
+  if (publicOrigin) {
+    try {
+      return new URL(publicOrigin).host === originHost;
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 function cookies(req: IncomingMessage): Record<string, string> {
@@ -135,13 +190,13 @@ function sendAuth(res: ServerResponse, status: number, session: PublicUser & { s
   sendJson(res, status, { user }, { "Set-Cookie": sessionCookie(token, Math.floor(SESSION_MS / 1000)) });
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, limit = 16_384): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     size += buffer.length;
-    if (size > 16_384) throw new HttpError(413, "BODY_TOO_LARGE", "Request body is too large.");
+    if (size > limit) throw new HttpError(413, "BODY_TOO_LARGE", "Request body is too large.");
     chunks.push(buffer);
   }
   if (size === 0) return {};
@@ -152,35 +207,29 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+function sessionTokenFrom(req: IncomingMessage): string | undefined {
+  const jar = cookies(req);
+  return jar[COOKIE] ?? jar[LEGACY_COOKIE];
+}
+
 async function currentUser(req: IncomingMessage) {
-  const token = cookies(req)[COOKIE];
+  const token = sessionTokenFrom(req);
   if (!token) throw new HttpError(401, "UNAUTHENTICATED", "Sign in to continue.");
   const user = await userBySession(token);
   if (!user) throw new HttpError(401, "UNAUTHENTICATED", "Sign in to continue.");
   return user;
 }
 
-async function openNexconnRoom(people: RoomParticipants): Promise<string | null> {
-  if (!nexconnConfigured()) return null;
-  const channelId = people.request.channelId ?? `room${people.request.id}`;
-  await issueAccessToken(people.member.id, people.member.name);
-  await issueAccessToken(people.volunteer.id, people.volunteer.name);
-  await issueAccessToken(people.coordinator.id, people.coordinator.name);
-  if (!people.request.channelId) {
-    await createHelpRoom({
-      channelId,
-      kind: people.request.kind,
-      ownerId: people.coordinator.id,
-      memberId: people.member.id,
-      volunteerId: people.volunteer.id,
-    });
+/** Order event from the ShopBridge system user. Best effort: a chat hiccup never fails the action. */
+async function announce(channelId: string | null, text: string): Promise<boolean> {
+  if (!channelId || !nexconnConfigured()) return false;
+  try {
+    await sendSystemText(channelId, text);
+    return true;
+  } catch (error) {
+    console.warn(`Could not post order event to ${channelId}: ${error instanceof Error ? error.message : error}`);
+    return false;
   }
-  return channelId;
-}
-
-async function announce(fromUserId: string, channelId: string | null, text: string): Promise<void> {
-  if (!channelId || !nexconnConfigured()) return;
-  await sendRoomText(fromUserId, channelId, text);
 }
 
 async function openOrderNexconnRoom(orderId: string) {
@@ -197,11 +246,7 @@ async function openOrderNexconnRoom(orderId: string) {
     sellerId: people.seller.id,
     productLabel: people.productLabel,
   });
-  await announce(
-    people.buyer.id,
-    channelId,
-    `Update · Order conversation opened for ${people.productLabel}.`,
-  );
+  await announce(channelId, `Update · Order conversation opened for ${people.productLabel}.`);
   return saveOrderChannel(orderId, channelId);
 }
 
@@ -276,16 +321,17 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   }
 
   if (req.method === "POST" && pathname === "/api/demo") {
-    assertAuthRate(req);
+    assertAuthRate(req, "demo");
     const body = requireObject(await readJson(req));
     sendAuth(res, 200, await signInDemo(parseDemoParty(body.account)));
     return;
   }
 
   if (req.method === "POST" && pathname === "/api/logout") {
-    const token = cookies(req)[COOKIE];
+    const token = sessionTokenFrom(req);
     if (token) await clearSession(token);
-    sendJson(res, 200, { ok: true }, { "Set-Cookie": sessionCookie("", 0) });
+    res.setHeader("Set-Cookie", [sessionCookie("", 0), `${LEGACY_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`]);
+    sendJson(res, 200, { ok: true });
     return;
   }
 
@@ -304,99 +350,58 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     return;
   }
 
-  if (req.method === "GET" && pathname === "/api/volunteers") {
-    const user = await currentUser(req);
-    if (user.role !== "coordinator") {
-      throw new HttpError(403, "FORBIDDEN", "Only a coordinator can view volunteers.");
-    }
-    sendJson(res, 200, { volunteers: await listVolunteers() });
-    return;
-  }
-
   if (req.method === "GET" && pathname === "/api/requests") {
     const user = await currentUser(req);
     sendJson(res, 200, { requests: await listRequests(user) });
     return;
   }
 
-  if (req.method === "POST" && pathname === "/api/requests") {
+  // Retired community-help endpoints from the earlier prototype. Order support replaces them.
+  if (
+    (req.method === "GET" && pathname === "/api/volunteers") ||
+    (req.method === "POST" && pathname === "/api/requests") ||
+    (req.method === "POST" && /^\/api\/requests\/[a-z0-9]+\/(assign|room|status)$/.test(pathname))
+  ) {
+    await currentUser(req);
+    throw new HttpError(410, "GONE", "Community help has been retired. Use order support from an order conversation.");
+  }
+
+  if (req.method === "PATCH" && pathname === "/api/me/preferences") {
     const user = await currentUser(req);
-    if (user.role !== "member") {
-      throw new HttpError(403, "FORBIDDEN", "Only a community member can request help.");
-    }
     const body = requireObject(await readJson(req));
-    const request = await createRequest(user, parseKind(body.kind), parseNote(body.note));
-    sendJson(res, 201, { request });
+    sendJson(res, 200, { user: await setUserLanguage(user, parseLanguage(body.language)) });
     return;
   }
 
-  const assignMatch = pathname.match(/^\/api\/requests\/([a-z0-9]+)\/assign$/);
-  if (req.method === "POST" && assignMatch) {
+  if (req.method === "GET" && pathname === "/api/demo/status") {
     const user = await currentUser(req);
-    if (user.role !== "coordinator") {
-      throw new HttpError(403, "FORBIDDEN", "Only a coordinator can assign a volunteer.");
-    }
-    const requestId = parseId(assignMatch[1]);
-    const body = requireObject(await readJson(req));
-    const volunteerId = typeof body.volunteerId === "string" ? body.volunteerId : "";
-    const people = await prepareAssignment(user, requestId, volunteerId);
-    const channelId = await openNexconnRoom(people);
-    const request = await saveAssignment(requestId, people.volunteer.id, user.id, channelId);
-    if (channelId) {
-      await announce(
-        user.id,
-        channelId,
-        `Update · Assigned. ${people.volunteer.name} will help ${people.member.name} with ${kindLabel(people.request.kind)}.`,
-      );
-    }
-    sendJson(res, 200, { request, nexconn: Boolean(channelId) });
+    sendJson(res, 200, {
+      resetEnabled: demoResetEnabled(),
+      canReset: demoResetEnabled() && user.sample,
+      epoch: currentDemoEpoch(),
+    });
     return;
   }
 
-  const roomMatch = pathname.match(/^\/api\/requests\/([a-z0-9]+)\/room$/);
-  if (req.method === "POST" && roomMatch) {
+  if (req.method === "POST" && pathname === "/api/demo/reset") {
+    // CSRF: a custom header cannot be sent cross-site without a CORS preflight (which this
+    // server never grants), and the Origin, when present, must be this host (or the Vite
+    // proxy front-end on loopback during local development).
+    if (req.headers["x-shopbridge-intent"] !== "reset-demo") {
+      throw new HttpError(403, "FORBIDDEN", "Missing reset confirmation header.");
+    }
+    if (!isTrustedDemoResetOrigin(req)) {
+      throw new HttpError(403, "FORBIDDEN", "Cross-site reset requests are not allowed.");
+    }
     const user = await currentUser(req);
-    if (user.role !== "coordinator") {
-      throw new HttpError(403, "FORBIDDEN", "Only a coordinator can open the help room.");
-    }
-    const requestId = parseId(roomMatch[1]);
-    const people = await prepareRoom(user, requestId);
-    if (people.request.channelId) {
-      const requests = await listRequests(user);
-      const request = requests.find((item) => item.id === requestId);
-      sendJson(res, 200, { request, nexconn: true });
-      return;
-    }
-    if (!nexconnConfigured()) {
-      throw new HttpError(503, "NEXCONN_NOT_CONFIGURED", "Add the Nexconn App Key and App Secret to .env, then try again.");
-    }
-    const channelId = await openNexconnRoom(people);
-    if (!channelId) {
-      throw new HttpError(503, "NEXCONN_NOT_CONFIGURED", "Add the Nexconn App Key and App Secret to .env, then try again.");
-    }
-    const request = await saveChannel(requestId, channelId);
-    await announce(
-      user.id,
-      channelId,
-      `Update · The help room is open for ${people.member.name} and ${people.volunteer.name}.`,
-    );
-    sendJson(res, 200, { request, nexconn: true });
-    return;
-  }
-
-  const statusMatch = pathname.match(/^\/api\/requests\/([a-z0-9]+)\/status$/);
-  if (req.method === "POST" && statusMatch) {
-    const user = await currentUser(req);
-    const requestId = parseId(statusMatch[1]);
+    if (!demoResetEnabled()) throw new HttpError(404, "NOT_FOUND", "That page does not exist.");
+    assertAuthRate(req, "reset");
     const body = requireObject(await readJson(req));
-    const status = parseStatus(body.status);
-    const { view } = await changeStatus(user, requestId, status);
-    const text =
-      status === "in_progress"
-        ? `Update · In progress. ${user.name} is handling this request.`
-        : `Update · Completed. ${user.name} marked this request done.`;
-    await announce(user.id, view.channelId, text);
-    sendJson(res, 200, { request: view, nexconn: Boolean(view.channelId) });
+    if (body.confirm !== "RESET") {
+      throw new HttpError(422, "VALIDATION_ERROR", "Confirm the reset to continue.");
+    }
+    const result = await resetDemoForUser(user, clientKey(req));
+    sendJson(res, 200, { ok: true, ...result }, { "X-Demo-Epoch": result.epoch });
     return;
   }
 
@@ -526,9 +531,7 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
       order = await openOrderNexconnRoom(orderId);
     }
     const request = await createOrderSupport(user, order.id, note);
-    if (order.channelId) {
-      await announce(user.id, order.channelId, `Update · Support requested for this order.`);
-    }
+    await announce(order.channelId, "Update · Support requested for this order.");
     sendJson(res, 201, { request, order });
     return;
   }
@@ -541,14 +544,127 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     }
     const requestId = parseId(claimMatch![1]);
     const claimed = await claimOrderSupport(user, requestId);
+    if (!nexconnConfigured()) {
+      sendJson(res, 200, { request: claimed.view, nexconn: false });
+      return;
+    }
     await issueAccessToken(user.id, user.name);
     await joinGroupMembers(claimed.channelId, [user.id]);
-    await announce(
-      user.id,
-      claimed.channelId,
-      `Update · Support joined. ${user.name} is on this order with the buyer and seller.`,
-    );
+    await announce(claimed.channelId, `Update · Support joined. ${user.name} is on this order with the buyer and seller.`);
     sendJson(res, 200, { request: claimed.view, nexconn: true });
+    return;
+  }
+
+  const orderStatusMatch = pathname.match(/^\/api\/orders\/([a-z0-9]+)\/status$/);
+  if (req.method === "POST" && orderStatusMatch) {
+    const user = await currentUser(req);
+    if (user.role !== "volunteer") throw new HttpError(403, "FORBIDDEN", "Only the seller can update an order.");
+    const body = requireObject(await readJson(req));
+    const status = parseOrderStatus(body.status);
+    const shipment =
+      status === "shipped" && typeof body.courier === "string" && body.courier.trim() && typeof body.awb === "string" && body.awb.trim()
+        ? {
+            courier: parseShortText(body.courier, "courier"),
+            awb: parseShortText(body.awb, "tracking number"),
+            eta: typeof body.eta === "string" && body.eta.trim() ? parseShortText(body.eta, "delivery estimate") : null,
+          }
+        : null;
+    const orderId = parseId(orderStatusMatch[1]);
+    const { order } = await advanceOrder(user, orderId, status, shipment);
+    await announce(order.channelId, orderEventText(order.status, user.name));
+    if (shipment && order.channelId && nexconnConfigured()) {
+      const participants = await orderParticipants(orderId);
+      await sendCustomMessage(user.id, order.channelId, MESSAGE_TYPES.track, cardContent("track", participants.order)).catch(
+        () => undefined,
+      );
+    }
+    sendJson(res, 200, { order });
+    return;
+  }
+
+  const offerMatch = pathname.match(/^\/api\/orders\/([a-z0-9]+)\/offers$/);
+  if (req.method === "POST" && offerMatch) {
+    const user = await currentUser(req);
+    if (user.role !== "volunteer") throw new HttpError(403, "FORBIDDEN", "Only the seller can make an offer.");
+    const body = requireObject(await readJson(req));
+    const amount = parsePrice(body.amount);
+    const note = parseResolutionNote(body.note);
+    const orderId = parseId(offerMatch[1]);
+    const order = await makeOffer(user, orderId, amount, note);
+    if (order.channelId && nexconnConfigured()) {
+      const participants = await orderParticipants(orderId);
+      await sendCustomMessage(user.id, order.channelId, MESSAGE_TYPES.offer, cardContent("offer", participants.order));
+    }
+    sendJson(res, 201, { order });
+    return;
+  }
+
+  const offerReplyMatch = pathname.match(/^\/api\/orders\/([a-z0-9]+)\/offers\/([a-z0-9]+)$/);
+  if (req.method === "POST" && offerReplyMatch) {
+    const user = await currentUser(req);
+    if (user.role !== "member") throw new HttpError(403, "FORBIDDEN", "Only the buyer can answer an offer.");
+    const body = requireObject(await readJson(req));
+    if (typeof body.accept !== "boolean") throw new HttpError(422, "VALIDATION_ERROR", "Accept or decline the offer.");
+    const order = await respondToOffer(user, parseId(offerReplyMatch[1]), parseId(offerReplyMatch[2]), body.accept);
+    await announce(
+      order.channelId,
+      body.accept
+        ? `Update · Offer accepted. Order total updated to ${formatInr(order.total)}.`
+        : "Update · The buyer declined the offer.",
+    );
+    sendJson(res, 200, { order });
+    return;
+  }
+
+  const resolutionMatch = pathname.match(/^\/api\/requests\/([a-z0-9]+)\/resolution$/);
+  if (req.method === "POST" && resolutionMatch) {
+    const user = await currentUser(req);
+    if (user.role !== "coordinator") throw new HttpError(403, "FORBIDDEN", "Only a support agent can propose a resolution.");
+    const body = requireObject(await readJson(req));
+    const resolution = parseResolution(body.resolution);
+    const note = parseResolutionNote(body.note);
+    const request = await proposeResolution(user, parseId(resolutionMatch[1]), resolution, note);
+    await announce(
+      request.channelId,
+      `Update · Resolution proposed: ${RESOLUTION_LABEL[resolution]}.${note ? ` ${note}` : ""}`,
+    );
+    sendJson(res, 200, { request });
+    return;
+  }
+
+  const assistMatch = pathname.match(/^\/api\/requests\/([a-z0-9]+)\/assist$/);
+  if (req.method === "POST" && assistMatch) {
+    const user = await currentUser(req);
+    if (user.role !== "coordinator") throw new HttpError(403, "FORBIDDEN", "Only a support agent can draft replies.");
+    assertAuthRate(req, "assist");
+    const record = await requestRecord(parseId(assistMatch[1]));
+    if (!record || !record.orderId || record.coordinatorId !== user.id) {
+      throw new HttpError(404, "NOT_FOUND", "That support case does not exist.");
+    }
+    if (record.status === "completed") throw new HttpError(409, "BAD_STATUS", "This case is already resolved.");
+    const body = requireObject(await readJson(req, 64_000));
+    const transcript = parseTranscript(body.transcript);
+    const language = body.language === undefined ? user.language ?? "en" : parseLanguage(body.language);
+    const order = await getOrder(user, record.orderId);
+    const support = (await listRequests(user)).find((item) => item.id === record.id)!;
+    sendJson(res, 200, await draftReply({ order, support, transcript, language }));
+    return;
+  }
+
+  const responseMatch = pathname.match(/^\/api\/requests\/([a-z0-9]+)\/response$/);
+  if (req.method === "POST" && responseMatch) {
+    const user = await currentUser(req);
+    if (user.role !== "member") throw new HttpError(403, "FORBIDDEN", "Only the buyer can answer a proposal.");
+    const body = requireObject(await readJson(req));
+    if (typeof body.accept !== "boolean") throw new HttpError(422, "VALIDATION_ERROR", "Accept or decline the proposal.");
+    const request = await respondToResolution(user, parseId(responseMatch[1]), body.accept);
+    await announce(
+      request.channelId,
+      body.accept
+        ? "Update · Resolved. The buyer confirmed the resolution."
+        : "Update · The buyer declined the proposal. Support will follow up.",
+    );
+    sendJson(res, 200, { request });
     return;
   }
 
@@ -616,6 +732,23 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   throw new HttpError(404, "NOT_FOUND", "That page does not exist.");
 }
 
+/**
+ * Nexconn's web SDK talks to its own HTTPS/WSS endpoints and loads uploaded media from
+ * its file CDN, so connect-src/img-src allow https:/wss: rather than a fixed host list.
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob: https:",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "connect-src 'self' https: wss:",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 const contentTypes: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -624,6 +757,8 @@ const contentTypes: Record<string, string> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".json": "application/json; charset=utf-8",
 };
 
 async function fileExists(filePath: string): Promise<boolean> {
@@ -647,13 +782,18 @@ async function handleStatic(_req: IncomingMessage, res: ServerResponse, url: URL
     filePath = path.join(webRoot, "index.html");
   }
   if (!(await fileExists(filePath))) {
-    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Saathi is not built yet. Use npm run dev." } });
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "ShopBridge is not built yet. Run npm run build." } });
     return;
   }
+  const ext = path.extname(filePath);
   res.writeHead(200, {
-    "Content-Type": contentTypes[path.extname(filePath)] ?? "application/octet-stream",
+    "Content-Type": contentTypes[ext] ?? "application/octet-stream",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    // Hashed build assets can be cached forever; the HTML shell must always revalidate.
+    "Cache-Control": filePath.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache",
+    ...(ext === ".html" ? { "Content-Security-Policy": CONTENT_SECURITY_POLICY } : {}),
   });
   const stream = createReadStream(filePath);
   stream.on("error", () => {
@@ -677,6 +817,23 @@ const server = createServer((req, res) => {
   });
 });
 
+/** Schema check at boot: additive migrations can run automatically when explicitly enabled. */
+async function prepareDatabase(): Promise<void> {
+  if (process.env.SHOPBRIDGE_AUTO_MIGRATE === "1") {
+    const result = await applyMigrations();
+    if (result.applied.length) console.log(`Applied migrations: ${result.applied.join(", ")}`);
+    return;
+  }
+  const missing = await withClient(async (client) => {
+    const res = await client.query("SELECT id FROM schema_migrations");
+    const applied = new Set(res.rows.map((row) => row.id as string));
+    return ["001_init.sql", "002_lifecycle_language_demo.sql", "003_offers_shipment.sql"].filter((id) => !applied.has(id));
+  });
+  if (missing.length) {
+    console.error(`WARNING: database migrations not applied: ${missing.join(", ")}. Run npm run db:migrate.`);
+  }
+}
+
 function start(): void {
   loadEnvFile();
   if (process.env.NODE_ENV === "production" && !databaseUrlConfigured()) {
@@ -689,6 +846,15 @@ function start(): void {
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
+  }
+  if (backend === "postgres") {
+    prepareDatabase()
+      .catch((error: unknown) => {
+        console.error("Database preparation failed:", error instanceof Error ? error.message : error);
+      })
+      .finally(startDemoEpochWatch);
+  } else {
+    startDemoEpochWatch();
   }
   server.listen(port, () => {
     console.log(`ShopBridge server listening on port ${port}`);

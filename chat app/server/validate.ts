@@ -1,4 +1,17 @@
-import { CATEGORIES, KINDS, STATUSES, type Category, type HelpKind, type RequestStatus } from "../shared/types";
+import {
+  CATEGORIES,
+  KINDS,
+  LANGUAGES,
+  ORDER_STATUSES,
+  RESOLUTIONS,
+  STATUSES,
+  type Category,
+  type HelpKind,
+  type Language,
+  type OrderStatus,
+  type RequestStatus,
+  type Resolution,
+} from "../shared/types";
 import { isAllowedProductImage } from "../shared/catalog";
 import { HttpError } from "./errors";
 
@@ -160,4 +173,40 @@ export function assertStatus(value: string): RequestStatus {
     throw new HttpError(500, "STORE_ERROR", "Stored status is invalid.");
   }
   return value as RequestStatus;
+}
+
+export function parseLanguage(value: unknown): Language {
+  if (typeof value !== "string" || !(LANGUAGES as readonly string[]).includes(value)) {
+    throw new HttpError(422, "VALIDATION_ERROR", "Choose a supported language.");
+  }
+  return value as Language;
+}
+
+export function parseResolution(value: unknown): Resolution {
+  if (typeof value !== "string" || !(RESOLUTIONS as readonly string[]).includes(value)) {
+    throw new HttpError(422, "VALIDATION_ERROR", "Choose a resolution.");
+  }
+  return value as Resolution;
+}
+
+export function parseOrderStatus(value: unknown): OrderStatus {
+  if (typeof value !== "string" || !(ORDER_STATUSES as readonly string[]).includes(value)) {
+    throw new HttpError(422, "VALIDATION_ERROR", "Choose an order status.");
+  }
+  return value as OrderStatus;
+}
+
+export function parseResolutionNote(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new HttpError(422, "VALIDATION_ERROR", "Enter a short note.");
+  const note = value.trim().replace(/\s+/g, " ");
+  if (note.length > 240) throw new HttpError(422, "VALIDATION_ERROR", "Keep the note under 240 characters.");
+  return note;
+}
+
+export function parseShortText(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new HttpError(422, "VALIDATION_ERROR", `Enter the ${label}.`);
+  const text = value.trim().replace(/\s+/g, " ");
+  if (!text || text.length > 60) throw new HttpError(422, "VALIDATION_ERROR", `Enter a ${label} under 60 characters.`);
+  return text;
 }

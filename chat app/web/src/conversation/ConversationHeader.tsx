@@ -8,6 +8,7 @@ export function ConversationHeader({
   orderId,
   statusLabel,
   statusTone,
+  subtitle,
   onBack,
 }: {
   counterpart: PublicUser;
@@ -15,13 +16,14 @@ export function ConversationHeader({
   orderId: string;
   statusLabel?: string;
   statusTone?: "warning" | "accent" | "success" | "neutral";
+  subtitle?: string;
   onBack?: () => void;
 }) {
   return (
     <div className="conv-header-wrap">
       {onBack ? (
         <button type="button" className="text-back conv-back" onClick={onBack}>
-          ← Back
+          <span aria-hidden="true">←</span> Back to conversations
         </button>
       ) : null}
       <header className="conv-header">
@@ -31,6 +33,7 @@ export function ConversationHeader({
           <p className="conv-header-meta">
             {title} · <span className="cell-id">{orderId}</span>
           </p>
+          {subtitle ? <p className="conv-header-meta">{subtitle}</p> : null}
         </div>
         {statusLabel ? <Badge tone={statusTone ?? "neutral"}>{statusLabel}</Badge> : null}
       </header>

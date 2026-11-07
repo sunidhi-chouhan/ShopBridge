@@ -1,5 +1,4 @@
-import type { HelpKind, ProductView, RequestStatus } from "../../../shared/types";
-import { kindLabel, statusLabel } from "../copy";
+import type { ProductView, RequestStatus } from "../../../shared/types";
 
 export function formatDeskWhen(iso: string): string {
   return new Date(iso).toLocaleString("en-IN", {
@@ -8,6 +7,15 @@ export function formatDeskWhen(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/** "4 min", "2 h", "3 d" since an ISO time. */
+export function formatWaiting(iso: string, now = Date.now()): string {
+  const minutes = Math.max(0, Math.round((now - Date.parse(iso)) / 60000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} d`;
 }
 
 export function requestTone(status: RequestStatus): "neutral" | "accent" | "warning" | "success" {
@@ -21,13 +29,4 @@ export function productStatus(product: ProductView): { label: "Live" | "Draft" |
   if (!product.published) return { label: "Draft", tone: "neutral" };
   if (product.stock === 0) return { label: "Out of stock", tone: "warning" };
   return { label: "Live", tone: "success" };
-}
-
-export function requestPreview(note: string, kind: HelpKind): string {
-  const trimmed = note.trim();
-  return trimmed || kindLabel(kind);
-}
-
-export function requestChip(status: RequestStatus): string {
-  return statusLabel(status);
 }

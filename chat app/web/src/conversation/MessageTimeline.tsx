@@ -1,7 +1,7 @@
+import type { Language } from "../../../shared/types";
 import type { ChatLine } from "../chat/nexconn";
-import { copy } from "../copy";
+import { t } from "../i18n";
 import { EmptyState } from "../ui/StateView";
-import { isSystemEvent } from "./format";
 import { MessageItem } from "./MessageItem";
 import { SystemEvent } from "./SystemEvent";
 
@@ -10,6 +10,7 @@ export function MessageTimeline({
   selfId,
   names,
   roles,
+  languages,
   animateNew,
   targetLanguage,
   autoTranslate,
@@ -19,28 +20,39 @@ export function MessageTimeline({
   selfId: string;
   names: Record<string, string>;
   roles?: Record<string, string>;
+  languages?: Record<string, Language | null | undefined>;
   animateNew: boolean;
-  targetLanguage: string;
+  targetLanguage: Language;
   autoTranslate: boolean;
   sharedFailureNotice?: boolean;
 }) {
   if (lines.length === 0) {
-    return <EmptyState compact inset title={copy.emptyChat} scene="inbox" />;
+    return <EmptyState compact inset title={t(targetLanguage, "noMessages")} scene="inbox" />;
   }
 
+  // role="log": screen readers announce additions politely without re-reading history.
   return (
-    <ol className="messages" aria-live="polite">
+    <ol className="messages" role="log" aria-live="polite" aria-relevant="additions">
       {lines.map((line) => {
-        if (isSystemEvent(line.text)) {
-          return <SystemEvent key={line.id} line={line} animate={animateNew} />;
+        if (line.system) {
+          return (
+            <SystemEvent
+              key={line.id}
+              line={line}
+              animate={animateNew}
+              targetLanguage={targetLanguage}
+              autoTranslate={autoTranslate}
+            />
+          );
         }
         return (
           <MessageItem
             key={line.id}
             line={line}
             mine={line.senderId === selfId}
-            name={names[line.senderId] ?? copy.name}
+            name={names[line.senderId] ?? "ShopBridge"}
             role={roles?.[line.senderId]}
+            senderLanguage={languages?.[line.senderId] ?? undefined}
             animate={animateNew}
             targetLanguage={targetLanguage}
             autoTranslate={autoTranslate}

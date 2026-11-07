@@ -48,3 +48,6 @@ next-env.d.ts
 **/Yusr/
 yousr/.agents/
 yousr/skills-lock.json
+
+# Unrelated project kept on disk, not part of ShopBridge
+yousr/

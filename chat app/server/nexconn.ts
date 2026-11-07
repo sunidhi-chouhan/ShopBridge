@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { HelpKind } from "../shared/types";
+import { SYSTEM_USER_ID, SYSTEM_USER_NAME, type HelpKind } from "../shared/types";
 
 type NexconnJson = {
   code?: number;
@@ -86,7 +86,8 @@ async function createGroupChannel(input: {
     name: input.name.slice(0, 64),
     owner: input.ownerId,
     userIds: input.memberIds,
-    permissions: { joinPerm: 1, invitePerm: 0 },
+    // 3 = nobody can join on their own; only this server adds members (verified against the live API).
+    permissions: { joinPerm: 3, invitePerm: 0 },
   });
 }
 
@@ -131,8 +132,9 @@ export async function createOrderRoom(input: {
     });
   } catch (error) {
     // Idempotent retry: channel may already exist from a prior attempt.
-    await joinGroupMembers(channelId, [input.buyerId, input.sellerId]);
     if (!(error instanceof NexconnError)) throw error;
+    console.warn(`Nexconn create for ${channelId} failed (${error.message}); trying join instead.`);
+    await joinGroupMembers(channelId, [input.buyerId, input.sellerId]);
   }
   return channelId;
 }
@@ -146,4 +148,65 @@ export async function sendRoomText(fromUserId: string, channelId: string, text: 
     shouldPersist: 1,
     isEchoToSender: 1,
   });
+}
+
+let systemUserReady = false;
+
+/** Register the ShopBridge system sender once per process. */
+async function ensureSystemUser(): Promise<void> {
+  if (systemUserReady) return;
+  await issueAccessToken(SYSTEM_USER_ID, SYSTEM_USER_NAME);
+  systemUserReady = true;
+}
+
+/**
+ * Post an order event ("Update · …") from the ShopBridge system user. Clients render a
+ * message as a system event only when it comes from this sender.
+ */
+export async function sendSystemText(channelId: string, text: string): Promise<void> {
+  await ensureSystemUser();
+  await sendRoomText(SYSTEM_USER_ID, channelId, text);
+}
+
+/**
+ * Server-sent custom message (offer, tracking card…). Only the server sends these, so a
+ * buyer cannot forge a price or a shipment. `fromUserId` null = ShopBridge system user.
+ */
+export async function sendCustomMessage(
+  fromUserId: string | null,
+  channelId: string,
+  messageType: string,
+  content: Record<string, unknown>,
+): Promise<void> {
+  if (!fromUserId) await ensureSystemUser();
+  await signedPost("/v4/group-channel/message/send", {
+    fromUserId: fromUserId ?? SYSTEM_USER_ID,
+    toChannelIds: [channelId],
+    messageType,
+    content: JSON.stringify(content),
+    shouldPersist: 1,
+    isEchoToSender: 1,
+  });
+}
+
+/** Create one order channel with the given members and replay a scripted conversation into it. */
+export async function provisionScriptedChannel(input: {
+  channelId: string;
+  name: string;
+  ownerId: string;
+  memberIds: string[];
+  lines: Array<{ fromUserId: string | null; text: string; custom?: { type: string; content: Record<string, unknown> } }>;
+}): Promise<void> {
+  await ensureSystemUser();
+  await createGroupChannel({
+    channelId: input.channelId,
+    name: input.name,
+    ownerId: input.ownerId,
+    memberIds: input.memberIds,
+  });
+  for (const line of input.lines) {
+    if (line.custom) await sendCustomMessage(line.fromUserId, input.channelId, line.custom.type, line.custom.content);
+    else if (line.fromUserId) await sendRoomText(line.fromUserId, input.channelId, line.text);
+    else await sendSystemText(input.channelId, line.text);
+  }
 }

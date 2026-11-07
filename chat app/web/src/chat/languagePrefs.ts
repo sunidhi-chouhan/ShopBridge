@@ -1,28 +1,26 @@
-/** Preferred reading language for Nexconn translation. Persisted per ShopBridge user. */
+/** Reading-language options and the per-device auto-translate preference. */
+import type { Language } from "../../../shared/types";
 
-export type LangOption = { code: string; label: string };
+export type LangOption = { code: Language; label: string; native: string };
 
-/** Curated subset for demo — codes match Nexconn supported language codes. */
+/** Codes match Nexconn translation language codes. */
 export const LANGUAGE_OPTIONS: LangOption[] = [
-  { code: "en", label: "English" },
-  { code: "hi", label: "Hindi" },
-  { code: "ar", label: "Arabic" },
-  { code: "zh", label: "Chinese" },
-  { code: "es", label: "Spanish" },
-  { code: "fr", label: "French" },
+  { code: "en", label: "English", native: "English" },
+  { code: "hi", label: "Hindi", native: "हिन्दी · Hindi" },
+  { code: "ar", label: "Arabic", native: "العربية · Arabic" },
+  { code: "zh", label: "Chinese", native: "中文 · Chinese" },
+  { code: "es", label: "Spanish", native: "Español · Spanish" },
+  { code: "fr", label: "French", native: "Français · French" },
 ];
 
 export type LanguagePrefs = {
-  /** Target language for incoming message translation */
+  /** Kept for older stored values; the reading language now lives on the server. */
   targetLanguage: string;
-  /** When true, peer messages are translated automatically after load/receive */
+  /** When true, messages are translated automatically after load/receive */
   autoTranslate: boolean;
 };
 
-const DEFAULTS: LanguagePrefs = {
-  targetLanguage: "en",
-  autoTranslate: true,
-};
+const DEFAULTS: LanguagePrefs = { targetLanguage: "en", autoTranslate: true };
 
 function storageKey(userId: string): string {
   return `shopbridge.langPrefs.${userId}`;
@@ -33,10 +31,8 @@ export function loadLanguagePrefs(userId: string): LanguagePrefs {
     const raw = localStorage.getItem(storageKey(userId));
     if (!raw) return { ...DEFAULTS };
     const parsed = JSON.parse(raw) as Partial<LanguagePrefs>;
-    const code = typeof parsed.targetLanguage === "string" ? parsed.targetLanguage : DEFAULTS.targetLanguage;
-    const known = LANGUAGE_OPTIONS.some((item) => item.code === code);
     return {
-      targetLanguage: known ? code : DEFAULTS.targetLanguage,
+      targetLanguage: typeof parsed.targetLanguage === "string" ? parsed.targetLanguage : DEFAULTS.targetLanguage,
       autoTranslate: typeof parsed.autoTranslate === "boolean" ? parsed.autoTranslate : DEFAULTS.autoTranslate,
     };
   } catch {
@@ -45,7 +41,11 @@ export function loadLanguagePrefs(userId: string): LanguagePrefs {
 }
 
 export function saveLanguagePrefs(userId: string, prefs: LanguagePrefs): void {
-  localStorage.setItem(storageKey(userId), JSON.stringify(prefs));
+  try {
+    localStorage.setItem(storageKey(userId), JSON.stringify(prefs));
+  } catch {
+    // Private mode / storage full: preference simply is not remembered on this device.
+  }
 }
 
 export function languageLabel(code: string): string {

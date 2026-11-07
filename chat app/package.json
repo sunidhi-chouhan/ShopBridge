@@ -14,9 +14,13 @@
     "db:migrate": "tsx server/db/run-migrate.ts",
     "db:import:dry": "tsx server/db/import-store.ts --dry-run",
     "db:import": "tsx server/db/import-store.ts --apply",
-    "db:verify": "tsx server/db/verify-import.ts"
+    "db:verify": "tsx server/db/verify-import.ts",
+    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "test:pg:up": "docker run -d --rm --name sb-test-pg -e POSTGRES_PASSWORD=test -e POSTGRES_DB=shopbridge_test -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql:rw postgres:18",
+    "test:pg:down": "docker rm -f sb-test-pg"
   },
   "dependencies": {
+    "@nexconn/call": "^26.2.1",
     "@nexconn/chat": "^26.2.1",
     "@nexconn/engine": "^26.2.1",
     "bcrypt": "^6.0.0",

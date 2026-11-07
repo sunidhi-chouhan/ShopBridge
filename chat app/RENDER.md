@@ -15,13 +15,20 @@ Nexconn Chat remains external (App Key / App Secret in env). **No persistent dis
 
 ## Build & start
 
+The GitHub repo is a monorepo. Set **Root Directory** to `chat app` (exact path, including the space).
+
 | Setting | Value |
 | --- | --- |
-| Build Command | `npm ci && npm run build` |
+| Root Directory | `chat app` |
+| Build Command | `npm ci --include=dev && npm run build` |
 | Start Command | `npm start` |
 | Health Check Path | `/api/health` |
 
+`--include=dev` is required because Render sets `NODE_ENV=production` during install and Vite lives in `devDependencies`.
+
 Production **requires** `DATABASE_URL`. The process exits on boot if it is missing when `NODE_ENV=production`. JSON file fallback is **local-only**.
+
+**Do not** set `SHOPBRIDGE_AUTO_MIGRATE=1` on the live service. Neon already has migrations `001`–`003`. Leave auto-migrate unset so boot never applies SQL.
 
 ## Neon setup
 
@@ -61,6 +68,8 @@ Details: `HOSTED_DEMO_INIT.md`.
 | `NEXCONN_API_BASE` | Optional |
 | `SHOPBRIDGE_DEMO_PASSWORD` | Optional hackathon password login |
 | `SHOPBRIDGE_ALLOW_RESEED` | **Leave unset** |
+| `SHOPBRIDGE_AUTO_MIGRATE` | **Leave unset** (schema already on Neon) |
+| `SHOPBRIDGE_DEMO_RESET` | Optional `1` to show “Reset demo data” for demo accounts |
 | `SHOPBRIDGE_DATA_DIR` | Not used on Render when Postgres is configured |
 
 ## Health

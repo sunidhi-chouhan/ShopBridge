@@ -2,6 +2,8 @@ import {
   NCEngine,
   TranslateHandler,
   TranslateMessageParam,
+  TranslateSourceType,
+  TranslateTextParam,
   type TranslateResult,
 } from "@nexconn/chat";
 import type { ChatLine } from "./nexconn";
@@ -21,8 +23,7 @@ const cacheListeners = new Set<() => void>();
 let handlerReady = false;
 
 /** Short stable reason for UI — never shown as a send failure. */
-export const TRANSLATION_CONSOLE_HINT =
-  "Enable Translation in Nexconn Console to translate this message.";
+export const TRANSLATION_CONSOLE_HINT = "Translation is unavailable right now. Retry, or read the original.";
 
 function key(messageId: string, targetLanguage: string): string {
   return `${messageId}::${targetLanguage}`;
@@ -100,7 +101,10 @@ export function ensureTranslateHandler(): void {
     "shopbridge-translate",
     new TranslateHandler({
       onTranslationCompleted({ results }) {
-        for (const item of results) acceptResult(item, "en");
+        for (const item of results) {
+          if (item.sourceType === TranslateSourceType.CUSTOM_TEXT) acceptTextResult(item);
+          else acceptResult(item, "en");
+        }
       },
     }),
   );
@@ -147,7 +151,7 @@ export async function requestTranslations(
 ): Promise<{ requested: number; skipped: number }> {
   ensureTranslateHandler();
   const force = options?.force === true;
-  const eligible = lines.filter((line) => line.id && line.text.trim());
+  const eligible = lines.filter((line) => line.id && line.kind === "text" && line.text.trim());
   let skipped = 0;
   const pending: ChatLine[] = [];
 
@@ -227,4 +231,96 @@ export async function requestTranslations(
   }
 
   return { requested, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Free-text translation (composer preview: "how the other person will read this")
+// ---------------------------------------------------------------------------
+
+type TextWaiter = { text: string; target: string; resolve: (value: string | null) => void; timer: number };
+const textWaiters: TextWaiter[] = [];
+const textCache = new Map<string, string>();
+
+function acceptTextResult(item: TranslateResult): void {
+  const translated = item.translateInfo?.translatedText?.trim() ?? "";
+  const ok = (item.code === 0 || item.code === 200) && translated;
+  const target = item.translateInfo?.targetLanguage;
+  // Results identify the request; fall back to the oldest pending request for that target.
+  let index = textWaiters.findIndex((waiter) => waiter.text === item.identifier);
+  if (index === -1) index = textWaiters.findIndex((waiter) => !target || waiter.target === target);
+  if (index === -1) return;
+  const [waiter] = textWaiters.splice(index, 1);
+  window.clearTimeout(waiter.timer);
+  if (ok) textCache.set(`${waiter.target}::${waiter.text}`, translated);
+  waiter.resolve(ok ? translated : null);
+}
+
+/** Translate arbitrary text with Nexconn. Resolves null on failure or timeout. */
+export async function translateText(text: string, targetLanguage: string): Promise<string | null> {
+  const clean = text.trim();
+  if (!clean) return null;
+  const cached = textCache.get(`${targetLanguage}::${clean}`);
+  if (cached) return cached;
+  ensureTranslateHandler();
+  return new Promise((resolve) => {
+    const waiter: TextWaiter = {
+      text: clean,
+      target: targetLanguage,
+      resolve,
+      timer: window.setTimeout(() => {
+        const index = textWaiters.indexOf(waiter);
+        if (index !== -1) textWaiters.splice(index, 1);
+        resolve(null);
+      }, 10000),
+    };
+    textWaiters.push(waiter);
+    NCEngine.translateModule
+      .translateTexts({ list: [new TranslateTextParam(clean, "auto", targetLanguage)] })
+      .then((result) => {
+        if (!result.isOk) {
+          const index = textWaiters.indexOf(waiter);
+          if (index !== -1) textWaiters.splice(index, 1);
+          window.clearTimeout(waiter.timer);
+          resolve(null);
+        }
+      })
+      .catch(() => {
+        const index = textWaiters.indexOf(waiter);
+        if (index !== -1) textWaiters.splice(index, 1);
+        window.clearTimeout(waiter.timer);
+        resolve(null);
+      });
+  });
+}
+
+/** Drop cached translations for a message whose text changed (edited), so it is translated again. */
+export function forgetTranslation(messageId: string): void {
+  for (const cacheKey of [...cache.keys()]) {
+    if (cacheKey.startsWith(`${messageId}::`)) {
+      cache.delete(cacheKey);
+      inFlight.delete(cacheKey);
+    }
+  }
+  bumpCacheListeners();
+}
+
+/**
+ * True when a "translation" is effectively the original (message already in the reader's
+ * language — the service may only tweak punctuation or drop words). Word overlap ≥ 60%.
+ */
+export function isSameAsOriginal(original: string, translated: string): boolean {
+  const words = (text: string) =>
+    new Set(
+      text
+        .toLowerCase()
+        .normalize("NFKC")
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter(Boolean),
+    );
+  const a = words(original);
+  const b = words(translated);
+  if (a.size === 0 || b.size === 0) return original.trim() === translated.trim();
+  let shared = 0;
+  for (const word of b) if (a.has(word)) shared += 1;
+  return shared / Math.max(1, Math.min(a.size, b.size)) >= 0.6 && shared / Math.max(a.size, b.size) >= 0.5;
 }

@@ -11,10 +11,11 @@ function tone(status: RequestStatus): "neutral" | "accent" | "warning" | "succes
   return "neutral";
 }
 
+/** Support case progress: waiting → with support → resolution proposed → resolved. */
 export function StatusTrail({ status }: { status: RequestStatus }) {
   const current = steps.indexOf(status);
   return (
-    <ol className="trail" aria-label="Request status">
+    <ol className="trail" aria-label="Support case progress">
       {steps.map((step, index) => {
         const state = index < current ? "done" : index === current ? "current" : "upcoming";
         return (
