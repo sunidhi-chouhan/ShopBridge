@@ -461,7 +461,7 @@ export function Chat({
                 className="ix-btn"
                 onClick={() => void guard(async () => (await respondToOffer(order.id, String(p.offerId), false), onOrderChanged()), "Could not decline.")}
               >
-                Decline
+                <span className="ix-btn-label">Decline</span>
               </button>
               <button
                 type="button"
@@ -474,7 +474,7 @@ export function Chat({
                   }, "Could not accept.")
                 }
               >
-                Accept
+                <span className="ix-btn-label">Accept</span>
               </button>
             </div>
           ) : (
@@ -1133,7 +1133,7 @@ export function Chat({
             </button>
             <button
               type="submit"
-              className="ix-send"
+              className={`ix-send${draft.trim() || editing ? "" : " is-mic"}`}
               disabled={link !== "connected" && !draft.trim()}
               aria-label={draft.trim() ? (editing ? "Save edit" : "Send") : "Record voice message"}
               title={draft.trim() ? (editing ? "Save edit" : "Send") : "Record voice message"}

@@ -166,7 +166,15 @@
 .ix-hover-bar button { border: none; background: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: var(--ink-2); font-size: 15px; }
 .ix-hover-bar button:hover { background: var(--surface-2); color: var(--ink); }
 .ix-hover-bar svg { width: 16px; height: 16px; }
-@media (hover: hover) { .ix-msg:hover .ix-hover-bar, .ix-msg:focus-within .ix-hover-bar { display: flex; } }
+/* Transparent bridge over the 6px gap so the pointer never leaves a hoverable area on its way to the bar. */
+.ix-hover-bar::after { content: ""; position: absolute; top: -4px; bottom: -4px; width: 10px; background: transparent; }
+.me .ix-hover-bar::after { left: 100%; }
+.them .ix-hover-bar::after { right: 100%; }
+@media (hover: hover) {
+  /* Kept in layout and faded, with a short hide delay, so a quick pass over the gap does not flicker it away. */
+  .ix-hover-bar { display: flex; visibility: hidden; opacity: 0; pointer-events: none; transition: opacity 0.15s ease, visibility 0s linear 0.15s; transition-delay: 0.2s; }
+  .ix-msg:hover .ix-hover-bar, .ix-msg:focus-within .ix-hover-bar { visibility: visible; opacity: 1; pointer-events: auto; transition: opacity 0.12s ease, visibility 0s; transition-delay: 0s; }
+}
 
 /* cards */
 .ix-card { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: var(--surface); width: min(300px, 100%); color: var(--ink); white-space: normal; }
@@ -176,7 +184,7 @@
 .ix-card .price { font-family: var(--f-display); font-size: 26px; line-height: 1; }
 .ix-card .price s { font-family: var(--f-body); font-size: 14px; color: var(--ink-3); margin-left: 6px; }
 .ix-card .row { display: flex; gap: 8px; }
-.ix-card .row .ix-btn { flex: 1; height: 36px; }
+.ix-card .row .ix-btn { flex: 1 0 auto; height: 36px; white-space: nowrap; min-width: max-content; padding: 0 14px; }
 .ix-card.offer .ch { background: var(--marigold-soft); color: var(--marigold-ink); }
 .ix-card.track .ch { background: var(--indigo-soft); color: var(--indigo); }
 .ix-card.order .prodrow { display: flex; gap: 10px; align-items: center; }
@@ -234,6 +242,9 @@
 .ix-box textarea { flex: 1; min-width: 0; border: none; outline: none; background: none; resize: none; max-height: 140px; min-height: 24px; padding: 8px 4px; line-height: 1.4; width: auto; }
 .ix-send { flex: none; width: 40px; height: 36px; border-radius: 10px; border: none; background: var(--indigo); color: var(--indigo-ink); display: grid; place-items: center; margin-left: 2px; }
 .ix-send:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Empty composer: the button records a voice note, so it reads as a soft themed control, not the send action. */
+.ix-send.is-mic { background: var(--indigo-soft); color: var(--indigo); box-shadow: inset 0 0 0 1px var(--line); }
+.ix-send.is-mic:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
 .ix-send svg { width: 18px; height: 18px; }
 .ix-rec { display: flex; align-items: center; gap: 10px; border: 1px solid var(--madder); border-radius: 14px; padding: 4px 4px 4px 12px; background: var(--madder-soft); }
 .ix-rec .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--madder); animation: ix-pulse 1s infinite; }
@@ -518,8 +529,11 @@
 .ix-lobby-side h2 em { font-style: normal; color: #f0b9a5; }
 .ix-lobby-side .lede { margin: 0; color: var(--c-ink-2); font-size: 15px; line-height: 1.55; max-width: 26rem; }
 .ix-lobby-side label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--c-ink-2); }
-.ix-lobby-side select, .ix-call-pop select { height: 40px; border-radius: 12px; border: 1px solid var(--c-line, var(--line)); background: rgba(246, 239, 228, 0.06); color: inherit; padding: 0 10px; min-height: 0; }
-.ix-lobby-side select option { color: #1f1a14; }
+.ix-lobby-side select { height: 40px; border-radius: 12px; border: 1px solid var(--c-line); background: rgba(246, 239, 228, 0.06); color: inherit; padding: 0 10px; min-height: 0; color-scheme: dark; }
+.ix-lobby-side select option { background: #1a1612; color: var(--c-ink); }
+/* Device picker popover follows the app theme (it lives outside the dark call room). */
+.ix-call-pop select { height: 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); padding: 0 10px; min-height: 0; }
+.ix-call-pop select option { background: var(--surface); color: var(--ink); }
 .ix-lobby-side .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .ix-call-pop { z-index: 90 !important; }
 
@@ -615,7 +629,7 @@
 .ix-sys, .ix-calllog, .ix-card { animation: ix-msg-in 0.4s var(--ease-out) both; }
 .ix-reacts button { transition: transform 0.2s var(--ease-out); }
 .ix-reacts button:active { transform: scale(0.9); }
-.ix-hover-bar { animation: ix-pop-in 0.18s var(--ease-out) both; }
+.ix-msg:hover .ix-hover-bar, .ix-msg:focus-within .ix-hover-bar { animation: ix-pop-in 0.18s var(--ease-out) both; }
 @keyframes ix-pop-in { from { opacity: 0; transform: translateY(3px) scale(0.97); } }
 .ix-pop { animation: ix-pop-in 0.2s var(--ease-out) both; transform-origin: top; }
 .ix-calllog .ci { transition: transform 0.3s var(--ease-out); }
