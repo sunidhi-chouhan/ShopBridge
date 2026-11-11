@@ -13,7 +13,7 @@ import { DEMO_ACCOUNTS, DEMO_PARTIES, attachChannels, buildDemoPlan, type DemoUs
 import { hashPassword } from "./auth";
 import { HttpError } from "./errors";
 import { MESSAGE_TYPES } from "../shared/types";
-import { issueAccessToken, nexconnConfigured, orderChannelId, provisionScriptedChannel } from "./nexconn";
+import { issueAccessToken, nexconnConfigured, orderChannelId, probeNexconn, provisionScriptedChannel } from "./nexconn";
 import { cardContent } from "./cards";
 import * as store from "./store";
 import type { UserRecord } from "./store";
@@ -52,11 +52,15 @@ export function startDemoEpochWatch(): void {
 }
 
 async function provisionNexconn(plan: ReturnType<typeof buildDemoPlan>, users: DemoUserIds): Promise<void> {
+  // Fail fast with a clear signature/reachability error before creating channels.
+  await probeNexconn();
   for (const party of DEMO_PARTIES) await issueAccessToken(users[party], DEMO_ACCOUNTS[party].name);
   for (const entry of plan.orders) {
+    const channelId = entry.order.channelId;
+    if (!channelId) throw new Error(`Demo order ${entry.order.id} is missing a channel id.`);
     const members = [users.buyer, users.seller, ...(entry.supportInChannel ? [users.support] : [])];
     await provisionScriptedChannel({
-      channelId: entry.order.channelId!,
+      channelId,
       name: `Order ${entry.order.items[0]?.name ?? entry.order.id}`,
       ownerId: users.buyer,
       memberIds: members,
@@ -86,10 +90,12 @@ export async function performDemoReset(meta: store.DemoResetMeta): Promise<{ epo
       try {
         await provisionNexconn(plan, users);
       } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn(`[demo-reset] nexconn provision failed: ${detail}`);
         throw new HttpError(
           502,
           "NEXCONN_ERROR",
-          "Could not prepare the demo conversations in Nexconn. Nothing was changed. Try again.",
+          `Could not prepare the demo conversations in Nexconn. Nothing was changed. ${detail}`,
         );
       }
     }
