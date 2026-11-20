@@ -9,6 +9,7 @@ import { copy } from "./copy";
 import { AccountPanel } from "./pages/AccountPanel";
 import { BuyerOrders } from "./pages/BuyerOrders";
 import { InboxPage } from "./inbox/InboxPage";
+import { LivePage } from "./live/LivePage";
 import { CoordinatorDesk } from "./pages/CoordinatorDesk";
 import { SellerOrders } from "./pages/SellerOrders";
 import { SellerProducts } from "./pages/SellerProducts";
@@ -42,6 +43,7 @@ function Screen({
   if (user.role === "volunteer" && section === "orders") return <SellerOrders user={user} onInbox={() => go("inbox")} />;
   if (user.role === "volunteer" && section === "inbox") return <InboxPage user={user} party="seller" />;
   if (user.role === "volunteer" && section === "products") return <SellerProducts />;
+  if ((user.role === "member" || user.role === "volunteer") && section === "live") return <LivePage user={user} />;
   if (user.role === "coordinator" && section === "queue") return <CoordinatorDesk />;
   if (user.role === "coordinator" && section === "inbox") return <InboxPage user={user} party="support" />;
   const empty = emptyCopy(section, user.role);

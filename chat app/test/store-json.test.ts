@@ -53,6 +53,21 @@ describe("JSON store parity (local backend)", () => {
     assert.equal((await store.listOrders(seller)).length, DEMO_ORDERS.length, "only the showcase orders remain");
   });
 
+  it("buy-now checks out one product and leaves the bag untouched", async () => {
+    const buyer = (await store.userBySession((await store.signInDemo("buyer")).sessionToken))!;
+    const sari = (await store.listCatalog({ q: "sari" }))[0];
+    const bowl = (await store.listCatalog({ q: "bowl" }))[0];
+    await store.setCartItem(buyer, bowl.id, 1);
+    const [order] = await store.checkout(buyer, { productId: sari.id, quantity: 1 });
+    assert.equal(order.items.length, 1);
+    assert.equal(order.items[0].productId, sari.id);
+    assert.equal(order.total, sari.price);
+    assert.equal((await store.getProduct(sari.id, buyer)).stock, sari.stock - 1);
+    const bag = await store.getCart(buyer);
+    assert.deepEqual(bag.items.map((item) => item.product.id), [bowl.id]);
+    await store.setCartItem(buyer, bowl.id, 0);
+  });
+
   it("shared demo accounts keep earlier sessions alive", async () => {
     const first = await store.signInDemo("buyer");
     for (let i = 0; i < 12; i++) await store.signInDemo("buyer");

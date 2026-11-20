@@ -20,6 +20,7 @@ import { MESSAGE_TYPES } from "../shared/types";
 import { currentDemoEpoch, demoResetEnabled, resetDemoForUser, startDemoEpochWatch } from "./demo-reset";
 import { clientKey } from "./auth";
 import { draftReply, parseTranscript } from "./assist";
+import { endLive, featureLive, featuredFor, getLive, listLive, recordLiveSale, startLive } from "./live";
 import { SESSION_MS, assertAuthRate, parseDemoParty, reseedAllowed } from "./auth";
 import {
   advanceOrder,
@@ -666,6 +667,65 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     );
     sendJson(res, 200, { request });
     return;
+  }
+
+  // ---- Live sale rooms (Nexconn open channels) ----
+  if (req.method === "GET" && pathname === "/api/live") {
+    await currentUser(req);
+    sendJson(res, 200, { sessions: await listLive() });
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/live") {
+    const user = await currentUser(req);
+    if (user.role !== "volunteer") throw new HttpError(403, "FORBIDDEN", "Only a seller can go live.");
+    const body = requireObject(await readJson(req));
+    const title = parseShortText(body.title, "live session title");
+    const product =
+      typeof body.productId === "string" && body.productId ? await getProduct(parseId(body.productId), user) : null;
+    sendJson(res, 201, { session: await startLive(user, title, product) });
+    return;
+  }
+
+  const liveMatch = pathname.match(/^\/api\/live\/([a-f0-9]{16})(?:\/(feature|end|buy))?$/);
+  if (liveMatch) {
+    const [, liveId, action] = liveMatch;
+    const user = await currentUser(req);
+    if (req.method === "GET" && !action) {
+      sendJson(res, 200, { session: await getLive(liveId) });
+      return;
+    }
+    if (req.method === "POST" && action === "feature") {
+      const body = requireObject(await readJson(req));
+      const productId = parseId(typeof body.productId === "string" ? body.productId : "");
+      sendJson(res, 200, { session: await featureLive(user, liveId, await getProduct(productId, user)) });
+      return;
+    }
+    if (req.method === "POST" && action === "end") {
+      await endLive(user, liveId);
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (req.method === "POST" && action === "buy") {
+      if (user.role !== "member") throw new HttpError(403, "FORBIDDEN", "Only a buyer can buy.");
+      const body = requireObject(await readJson(req));
+      const productId = parseId(typeof body.productId === "string" ? body.productId : "");
+      const session = featuredFor(liveId, productId);
+      const [order] = await checkout(user, { productId, quantity: 1 });
+      let linked = order;
+      if (nexconnConfigured()) {
+        try {
+          linked = await openOrderNexconnRoom(order.id);
+          await announce(linked.channelId, `Update · Bought live during “${session.title}”.`);
+        } catch {
+          /* the order stands; its conversation can be opened later from Orders */
+        }
+      }
+      const live = await recordLiveSale(liveId, user.name, await getProduct(productId, user));
+      sendJson(res, 201, { order: linked, session: live });
+      return;
+    }
+    throw new HttpError(405, "METHOD_NOT_ALLOWED", "That action is not supported.");
   }
 
   if (req.method === "GET" && pathname === "/api/seller/products") {

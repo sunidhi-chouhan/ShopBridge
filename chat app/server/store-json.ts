@@ -859,12 +859,19 @@ export function setCartItem(buyer: UserRecord, productId: string, quantity: numb
   });
 }
 
-export function checkout(buyer: UserRecord): Promise<OrderView[]> {
+/** Check out the bag, or (with `only`) buy one product directly, leaving the bag untouched. */
+export function checkout(buyer: UserRecord, only?: { productId: string; quantity: number }): Promise<OrderView[]> {
   if (buyer.role !== "member") {
     throw new HttpError(403, "FORBIDDEN", "Only a buyer can check out.");
   }
   return update((db) => {
-    const cart = cartView(db, buyer.id);
+    let cart = cartView(db, buyer.id);
+    if (only) {
+      const product = db.products.find((row) => row.id === only.productId && row.published);
+      if (!product) throw new HttpError(409, "UNAVAILABLE", "This product is no longer available.");
+      const view = productView(db, product);
+      cart = { items: [{ product: view, quantity: only.quantity, lineTotal: view.price * only.quantity }], subtotal: view.price * only.quantity };
+    }
     if (cart.items.length === 0) {
       throw new HttpError(422, "CART_EMPTY", "Your bag is empty.");
     }
@@ -914,7 +921,7 @@ export function checkout(buyer: UserRecord): Promise<OrderView[]> {
       db.orders.push(order);
       created.push(order);
     }
-    db.carts[buyer.id] = [];
+    if (!only) db.carts[buyer.id] = [];
     return { db, result: created.map((order) => orderView(db, order)) };
   });
 }

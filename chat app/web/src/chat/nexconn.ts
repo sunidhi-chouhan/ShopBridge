@@ -1,6 +1,7 @@
 import {
   AreaCode,
   BaseChannel,
+  ChannelType,
   ConnectionStatus,
   ConnectionStatusHandler,
   GroupChannel,
@@ -34,6 +35,15 @@ export type ChatLine = {
 type Listener = (line: ChatLine) => void;
 
 const roomListeners = new Map<string, Set<Listener>>();
+const openListeners = new Set<(message: Message) => void>();
+
+/** Raw messages from open channels (live rooms). */
+export function subscribeOpenMessages(listener: (message: Message) => void): () => void {
+  openListeners.add(listener);
+  return () => {
+    openListeners.delete(listener);
+  };
+}
 const globalListeners = new Set<Listener>();
 let handlerReady = false;
 let initializedKey: string | null = null;
@@ -99,6 +109,9 @@ function registerCustomMessages(): void {
     // Live-only signals: not stored, not counted. (Status messages were not delivered in group channels.)
     { messageType: MESSAGE_TYPES.typing, isPersisted: false, isCounted: false },
     { messageType: MESSAGE_TYPES.edit, isPersisted: false, isCounted: false },
+    // Live rooms (open channels): server events are kept in room history; hearts are live-only.
+    { messageType: MESSAGE_TYPES.live, isPersisted: true, isCounted: false },
+    { messageType: MESSAGE_TYPES.heart, isPersisted: false, isCounted: false },
   ]);
 }
 
@@ -262,6 +275,11 @@ function ensureHandler(): void {
     new MessageHandler({
       onMessageReceived({ messages }) {
         for (const message of messages) {
+          // Live rooms have their own listeners; keep them out of inbox unread and notifications.
+          if (message.channelIdentifier?.channelType === ChannelType.OPEN) {
+            openListeners.forEach((listener) => listener(message));
+            continue;
+          }
           emit({ type: "message", raw: message });
           const line = toLine(message);
           if (!line || !line.channelId) continue;

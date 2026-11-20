@@ -56,6 +56,14 @@ function Icon({ name }: { name: Section }) {
       </svg>
     );
   }
+  if (name === "live") {
+    return (
+      <svg {...props}>
+        <circle cx="12" cy="12" r="2.5" />
+        <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14" />
+      </svg>
+    );
+  }
   if (name === "products") {
     return (
       <svg {...props}>

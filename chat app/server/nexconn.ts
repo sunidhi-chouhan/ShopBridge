@@ -263,3 +263,64 @@ export async function probeNexconn(): Promise<void> {
   await issueAccessToken(SYSTEM_USER_ID, SYSTEM_USER_NAME);
   systemUserReady = true;
 }
+
+// ---------------------------------------------------------------------------
+// Open channels (live sale rooms)
+// ---------------------------------------------------------------------------
+
+const OPEN_CHANNEL_EXISTS = 23435;
+const OPEN_CHANNEL_MISSING = 23410;
+
+/** Create a live room. Destroyed by Nexconn after `idleMinutes` with no activity. */
+export async function createOpenChannel(channelId: string, idleMinutes = 120): Promise<void> {
+  await ensureSystemUser();
+  try {
+    await signedPost("/v4/open-channel/create", { channelId, destroyType: 0, ttlMinutes: idleMinutes });
+  } catch (error) {
+    if (!(error instanceof NexconnError) || error.code !== OPEN_CHANNEL_EXISTS) throw error;
+  }
+}
+
+export async function destroyOpenChannel(channelId: string): Promise<void> {
+  await signedPost("/v4/open-channel/destroy", { channelIds: [channelId] });
+}
+
+/** Live participant count, or null when the room no longer exists on Nexconn. */
+export async function openChannelViewers(channelId: string): Promise<number | null> {
+  try {
+    const json = (await signedPost("/v4/open-channel/get", { channelId }, 1)) as NexconnJson & {
+      result?: { participantCount?: number };
+    };
+    return Number(json.result?.participantCount ?? 0);
+  } catch (error) {
+    if (error instanceof NexconnError && error.code === OPEN_CHANNEL_MISSING) return null;
+    throw error;
+  }
+}
+
+/** Room state (featured product, sold count) as open channel metadata, owned by the system user. */
+export async function setOpenChannelMetadata(channelId: string, metadata: Record<string, string>): Promise<void> {
+  await signedPost("/v4/open-channel/metadata/batch/set", {
+    channelId,
+    metadataOwnerId: SYSTEM_USER_ID,
+    shouldAutoDelete: 0,
+    metadata,
+  });
+}
+
+/** Server-sent custom message into a live room from the ShopBridge system user. */
+export async function sendOpenChannelCustom(
+  channelId: string,
+  messageType: string,
+  content: Record<string, unknown>,
+): Promise<void> {
+  await ensureSystemUser();
+  await signedPost("/v4/open-channel/message/send", {
+    fromUserId: SYSTEM_USER_ID,
+    toChannelIds: [channelId],
+    messageType,
+    content: JSON.stringify(content),
+    shouldPersist: 1,
+    isEchoToSender: 0,
+  });
+}

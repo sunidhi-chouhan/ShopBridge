@@ -914,20 +914,34 @@ export function setCartItem(buyer: UserRecord, productId: string, quantity: numb
   });
 }
 
-export function checkout(buyer: UserRecord): Promise<OrderView[]> {
+/**
+ * Check out the buyer's bag, or (with `only`) buy one product directly — the live-room
+ * "Buy now" — leaving the bag untouched.
+ */
+export function checkout(buyer: UserRecord, only?: { productId: string; quantity: number }): Promise<OrderView[]> {
   if (buyer.role !== "member") throw new HttpError(403, "FORBIDDEN", "Only a buyer can check out.");
   return tx(async (client) => {
     // Serialise checkouts for this buyer, then lock the products being bought.
     await client.query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE", [buyer.id]);
-    const res = await client.query(
-      `${PRODUCT_SELECT.replace("SELECT p.id", "SELECT ci.quantity AS cart_quantity, p.id")}
-         JOIN cart_items ci ON ci.product_id = p.id
-        WHERE ci.user_id = $1 AND p.published
-        ORDER BY p.name ASC
-        FOR UPDATE OF p`,
-      [buyer.id],
-    );
-    if (res.rows.length === 0) throw new HttpError(422, "CART_EMPTY", "Your bag is empty.");
+    const res = only
+      ? await client.query(
+          `${PRODUCT_SELECT.replace("SELECT p.id", "SELECT $2::int AS cart_quantity, p.id")}
+            WHERE p.id = $1 AND p.published
+            FOR UPDATE OF p`,
+          [only.productId, only.quantity],
+        )
+      : await client.query(
+          `${PRODUCT_SELECT.replace("SELECT p.id", "SELECT ci.quantity AS cart_quantity, p.id")}
+             JOIN cart_items ci ON ci.product_id = p.id
+            WHERE ci.user_id = $1 AND p.published
+            ORDER BY p.name ASC
+            FOR UPDATE OF p`,
+          [buyer.id],
+        );
+    if (res.rows.length === 0) {
+      if (only) throw new HttpError(409, "UNAVAILABLE", "This product is no longer available.");
+      throw new HttpError(422, "CART_EMPTY", "Your bag is empty.");
+    }
     const lines = res.rows.map((row) => ({ view: productRowView(row), quantity: Number(row.cart_quantity) }));
     for (const line of lines) {
       if (line.view.stock < line.quantity) {
@@ -979,7 +993,7 @@ export function checkout(buyer: UserRecord): Promise<OrderView[]> {
       }
       created.push(order);
     }
-    await client.query("DELETE FROM cart_items WHERE user_id = $1", [buyer.id]);
+    if (!only) await client.query("DELETE FROM cart_items WHERE user_id = $1", [buyer.id]);
     return orderViews(client, created);
   });
 }

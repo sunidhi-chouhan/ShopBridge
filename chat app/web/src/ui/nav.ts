@@ -1,6 +1,6 @@
 import type { Role } from "../../../shared/types";
 
-export type Section = "shop" | "orders" | "inbox" | "account" | "products" | "queue";
+export type Section = "shop" | "live" | "orders" | "inbox" | "account" | "products" | "queue";
 
 export function roleLabel(role: Role): string {
   if (role === "member") return "Buyer";
@@ -18,6 +18,7 @@ export function navItems(role: Role): { id: Section; label: string }[] {
   if (role === "member") {
     return [
       { id: "shop", label: "Shop" },
+      { id: "live", label: "Live" },
       { id: "orders", label: "Orders" },
       { id: "inbox", label: "Inbox" },
       { id: "account", label: "Account" },
@@ -27,6 +28,7 @@ export function navItems(role: Role): { id: Section; label: string }[] {
     return [
       { id: "orders", label: "Orders" },
       { id: "inbox", label: "Inbox" },
+      { id: "live", label: "Live" },
       { id: "products", label: "Products" },
     ];
   }

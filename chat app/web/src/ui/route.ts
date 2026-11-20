@@ -4,10 +4,11 @@ import type { Section } from "./nav";
 /**
  * Hash routes so a refresh keeps your place and conversations can be deep-linked:
  *   #/shop   #/shop/<productId>   #/orders   #/inbox   #/inbox/<orderId>   #/queue   #/products   #/account
+ *   #/live   #/live/<sessionId>
  */
-export type Route = { section: Section | null; orderId: string | null; productId: string | null };
+export type Route = { section: Section | null; orderId: string | null; productId: string | null; liveId: string | null };
 
-const SECTIONS: Section[] = ["shop", "orders", "inbox", "account", "products", "queue"];
+const SECTIONS: Section[] = ["shop", "live", "orders", "inbox", "account", "products", "queue"];
 const ID = /^[a-z0-9]{6,40}$/i;
 
 export function parseRoute(hash: string): Route {
@@ -18,6 +19,7 @@ export function parseRoute(hash: string): Route {
     section,
     orderId: section === "inbox" ? rest : null,
     productId: section === "shop" ? rest : null,
+    liveId: section === "live" ? rest : null,
   };
 }
 

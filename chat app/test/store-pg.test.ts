@@ -180,6 +180,19 @@ describe("PostgreSQL store", { skip: available ? false : PG_SKIP_REASON }, () =>
       orderId = orders[0].id;
     });
 
+    it("buy-now checks out one product and leaves the bag untouched", async () => {
+      const { user: buyer } = await demoUser("buyer");
+      const sari = (await store.listCatalog({ q: "sari" }))[0];
+      const bowl = (await store.listCatalog({ q: "bowl" }))[0];
+      await store.setCartItem(buyer, bowl.id, 1);
+      const [order] = await store.checkout(buyer, { productId: sari.id, quantity: 1 });
+      assert.deepEqual(order.items.map((item) => item.productId), [sari.id]);
+      assert.equal(order.total, sari.price);
+      assert.equal((await store.getProduct(sari.id, buyer)).stock, sari.stock - 1);
+      assert.deepEqual((await store.getCart(buyer)).items.map((item) => item.product.id), [bowl.id]);
+      await store.setCartItem(buyer, bowl.id, 0);
+    });
+
     it("never oversells under concurrent checkouts", async () => {
       const a = await store.registerBuyer("Race A", "race-a@example.test", "password-123");
       const b = await store.registerBuyer("Race B", "race-b@example.test", "password-123");

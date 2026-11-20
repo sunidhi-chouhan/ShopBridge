@@ -145,7 +145,34 @@ export const MESSAGE_TYPES = {
   pin: "SB:Pin",
   typing: "SB:Typing",
   edit: "SB:Edit",
+  /** Live room event from the server: start, featured product, sale, end. */
+  live: "SB:Live",
+  /** Live room hearts (live-only, never stored). */
+  heart: "SB:Heart",
 } as const;
+
+/** Product shown on the live stage. */
+export type LiveProduct = { id: string; name: string; price: number; image: string; stock: number };
+
+/** A seller's live sale room, backed by a Nexconn open channel. */
+export type LiveView = {
+  id: string;
+  channelId: string;
+  title: string;
+  seller: PublicUser;
+  startedAt: string;
+  featured: LiveProduct | null;
+  sold: number;
+  /** Participant count reported by Nexconn (null when unknown). */
+  viewers: number | null;
+};
+
+/** Content of an SB:Live message. Only the ShopBridge system user sends these. */
+export type LiveEvent =
+  | { kind: "start"; title: string; product: LiveProduct | null }
+  | { kind: "feature"; product: LiveProduct }
+  | { kind: "sale"; buyer: string; product: LiveProduct; sold: number }
+  | { kind: "end"; sold: number };
 
 export type OrderView = {
   id: string;

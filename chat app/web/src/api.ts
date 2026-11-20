@@ -6,6 +6,7 @@ import type {
   ConversationView,
   HelpRequestView,
   Language,
+  LiveView,
   OrderStatus,
   OrderView,
   ProductView,
@@ -282,4 +283,30 @@ export function draftSupportReply(
     method: "POST",
     body: JSON.stringify({ transcript, language }),
   });
+}
+
+// ---- Live sale rooms ----
+
+export function listLive(): Promise<{ sessions: LiveView[] }> {
+  return request("/api/live");
+}
+
+export function getLive(id: string): Promise<{ session: LiveView }> {
+  return request(`/api/live/${id}`);
+}
+
+export function startLive(title: string, productId: string | null): Promise<{ session: LiveView }> {
+  return request("/api/live", { method: "POST", body: JSON.stringify({ title, productId }) });
+}
+
+export function featureLive(id: string, productId: string): Promise<{ session: LiveView }> {
+  return request(`/api/live/${id}/feature`, { method: "POST", body: JSON.stringify({ productId }) });
+}
+
+export function endLive(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/live/${id}/end`, { method: "POST", body: "{}" });
+}
+
+export function buyLive(id: string, productId: string): Promise<{ order: OrderView; session: LiveView }> {
+  return request(`/api/live/${id}/buy`, { method: "POST", body: JSON.stringify({ productId }) });
 }

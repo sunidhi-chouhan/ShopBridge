@@ -89,6 +89,21 @@ describe("HTTP API (Postgres backend)", { skip: available ? false : PG_SKIP_REAS
     }
   });
 
+  it("live rooms: listing, role checks, and no Nexconn means no room", async () => {
+    const buyer = new Client("198.51.100.7");
+    const seller = new Client("198.51.100.8");
+    await buyer.demo("buyer");
+    await seller.demo("seller");
+    assert.equal((await new Client().call("GET", "/api/live")).status, 401);
+    assert.deepEqual((await buyer.call("GET", "/api/live")).json.sessions, []);
+    assert.equal((await buyer.call("POST", "/api/live", { title: "Hi" })).status, 403);
+    assert.equal((await seller.call("POST", "/api/live", { title: "" })).status, 422);
+    assert.equal((await seller.call("POST", "/api/live", { title: "Live from the loom" })).status, 503);
+    assert.equal((await buyer.call("GET", "/api/live/0123456789abcdef")).status, 404);
+    const sari = (await buyer.call("GET", "/api/products?q=sari")).json.products[0];
+    assert.equal((await buyer.call("POST", "/api/live/0123456789abcdef/buy", { productId: sari.id })).status, 404);
+  });
+
   it("walks buyer → seller → support with role checks", async () => {
     const buyer = new Client();
     const seller = new Client();
