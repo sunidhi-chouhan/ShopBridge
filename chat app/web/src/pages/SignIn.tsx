@@ -5,7 +5,29 @@ import { registerBuyer, signIn, signInDemo, type DemoAccount } from "../api";
 import { copy } from "../copy";
 import { Hall } from "../ui/Hall";
 import { easeOut, fadeUp, stagger, useMotionOn } from "../ui/motion";
-import { RevealHeadline } from "../ui/Reveal";
+import { HeroBoard } from "../ui/HeroBoard";
+import { Marquee, RotatingWord } from "../ui/flair";
+
+const LANGS = [
+  { text: "हिन्दी.", lang: "hi" },
+  { text: "English.", lang: "en" },
+  { text: "Español.", lang: "es" },
+  { text: "العربية.", lang: "ar" },
+  { text: "中文.", lang: "zh" },
+  { text: "Français.", lang: "fr" },
+];
+
+const FEATURES = [
+  "Live translation",
+  "Live sale rooms",
+  "Voice notes → text",
+  "Video calls",
+  "Support joins with full history",
+  "Read receipts",
+  "Server-verified offers",
+  "AI reply drafts",
+  "Photo evidence",
+];
 
 type Mode = "signin" | "register";
 
@@ -129,15 +151,65 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: PublicUser) => void 
           >
             {copy.place}
           </motion.p>
-          <RevealHeadline className="hall-title" />
+          <h1 className="hall-title hall-title-mix" aria-label="Every order is a conversation, in every language.">
+            <motion.span
+              className="line-sans"
+              aria-hidden="true"
+              initial={motionOn ? { opacity: 0, y: "40%" } : false}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.8, ease: easeOut }}
+            >
+              Every order is a
+            </motion.span>
+            <motion.span
+              className="line-serif"
+              aria-hidden="true"
+              initial={motionOn ? { opacity: 0, y: "40%" } : false}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.28, duration: 0.8, ease: easeOut }}
+            >
+              conversation.
+            </motion.span>
+            <motion.span
+              className="line-lang"
+              aria-hidden="true"
+              initial={motionOn ? { opacity: 0 } : false}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6, duration: 0.6 }}
+            >
+              in <RotatingWord words={LANGS} paused={paused} />
+            </motion.span>
+          </h1>
           <motion.p
             className="lede"
             initial={motionOn ? { opacity: 0, y: 12 } : false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.78, duration: 0.8, ease: easeOut }}
           >
-            Sign in to buy, sell, or support an order. Roles stay on the server.
+            Buyer, seller and support share one Nexconn conversation per order, each reading it in their own
+            language.
           </motion.p>
+          <motion.ul
+            className="hero-chips"
+            aria-label="Built with"
+            initial={motionOn ? "hidden" : false}
+            animate="show"
+            variants={stagger}
+          >
+            {["Nexconn Chat", "Live translation", "Live rooms", "Voice & video"].map((chip) => (
+              <motion.li key={chip} variants={fadeUp}>
+                {chip}
+              </motion.li>
+            ))}
+          </motion.ul>
+          <motion.div
+            className="hero-board-wrap"
+            initial={motionOn ? { opacity: 0, y: 24, rotate: 2 } : false}
+            animate={{ opacity: 1, y: 0, rotate: 0 }}
+            transition={{ delay: 1, duration: 0.9, ease: easeOut }}
+          >
+            <HeroBoard paused={paused} />
+          </motion.div>
         </div>
         <motion.form
           className="hall-enter"
@@ -269,6 +341,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: PublicUser) => void 
           </motion.section>
         </motion.form>
       </div>
+      <Marquee label="What ShopBridge does with Nexconn" items={FEATURES} speed={42} />
     </main>
   );
 }

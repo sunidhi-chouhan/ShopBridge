@@ -13,6 +13,7 @@ import { statusCopy, statusTone } from "../ui/OrderCard";
 import { EmptyState, ErrorState, LoadingState } from "../ui/StateView";
 import { useToast } from "../ui/Toast";
 import { statusLabel } from "../copy";
+import { GoLivePromo } from "../live/LiveHooks";
 
 function productNames(order: OrderView): string {
   const first = order.items[0];
@@ -90,6 +91,7 @@ export function SellerOrders({ user, onInbox }: { user: PublicUser; onInbox: () 
           <Metric label="Delivered" value={String(completed)} />
           <Metric label="Revenue" value={formatInr(revenue)} />
         </MetricGrid>
+        <GoLivePromo user={user} />
         {sales.length === 0 ? (
           <EmptyState
             compact

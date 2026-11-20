@@ -1,3 +1,4 @@
+import { LiveNowBanner } from "../live/LiveHooks";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { CATEGORIES, type CartView, type Category, type OrderView, type ProductView } from "../../../shared/types";
 import { CATALOG_SORTS, categoryLabel, formatInr, imageAlt, type CatalogSort } from "../../../shared/catalog";
@@ -258,6 +259,7 @@ function CatalogPage({
         </div>
         <BagIndicator count={bagCount} bump={bagBump} onClick={onBag} />
       </header>
+      <LiveNowBanner />
       <form
         className="lookbook-tools"
         onSubmit={(event) => {

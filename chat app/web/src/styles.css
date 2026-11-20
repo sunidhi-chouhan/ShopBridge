@@ -1672,14 +1672,14 @@ input[type="radio"] {
 @media (min-width: 960px) {
   .hall {
     display: grid;
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto 1fr auto;
   }
   .hall-stage {
     grid-template-columns: minmax(0, 1.32fr) minmax(340px, 0.78fr);
     align-items: center;
     gap: 56px;
-    padding: 2vh 7% 8vh;
-    min-height: calc(100vh - 92px);
+    padding: 2vh 7% 5vh;
+    min-height: calc(100vh - 136px);
   }
   .hall-title { font-size: clamp(2.8rem, 4.8vw, 4.65rem); }
   .hall-enter {

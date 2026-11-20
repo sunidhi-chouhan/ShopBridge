@@ -439,3 +439,5 @@
   .live-celebrate,
   .live-joined { animation: none; }
 }
+
+.live-lobby > .marquee { border-radius: var(--radius-panel); }

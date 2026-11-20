@@ -14,6 +14,7 @@ import {
 } from "../chat/translate";
 import { languageLabel } from "../chat/languagePrefs";
 import { Avatar } from "../ui/Avatar";
+import { Marquee } from "../ui/flair";
 import { Button } from "../ui/Button";
 import { ProductPhoto } from "../ui/ProductPhoto";
 import { navigate, useRoute } from "../ui/route";
@@ -80,6 +81,11 @@ function LiveLobby({ user }: { user: PublicUser }) {
 
   return (
     <div className="studio-stack desk-page live-lobby">
+      <Marquee
+        tone="accent"
+        speed={30}
+        items={["Live from the loom", "Ask in your language", "Hear back in yours", "Buy in one tap", "Powered by Nexconn open channels"]}
+      />
       <header className="page-mast">
         <p className="kicker">Live from the loom</p>
         <h1 className="page-title">{seller ? "Sell live, in every language." : "Shop live with the makers."}</h1>
